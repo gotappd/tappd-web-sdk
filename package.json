@@ -1,0 +1,43 @@
+{
+  "name": "@tappd/web-sdk",
+  "version": "1.0.1",
+  "description": "Tappd Web SDK for customer data collection and content delivery",
+  "main": "dist/index.js",
+  "browser": "dist/tappd-sdk.min.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:es && npm run build:umd",
+    "build:es": "tsc",
+    "build:umd": "webpack --mode production",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gotappd/tappd.io.git",
+    "directory": "packages/web-sdk"
+  },
+  "devDependencies": {
+    "ts-loader": "^9.5.1",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "keywords": [
+    "tappd",
+    "sdk",
+    "customer-data",
+    "cdp",
+    "web",
+    "browser"
+  ],
+  "author": "Tappd",
+  "license": "MIT"
+}

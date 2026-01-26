@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tappd SDK - Basic Example</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .info {
+      background: #e7f3ff;
+      border-left: 4px solid #007bff;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tappd Web SDK - Basic Example</h1>
+  
+  <div class="info">
+    <strong>Note:</strong> Replace <code>YOUR_APP_ID</code> with your actual App ID from the dashboard.
+    You can find your App ID in the Apps settings page.
+  </div>
+
+  <div class="container">
+    <h2>1. SDK Initialization</h2>
+    <p>Initialize the SDK with your App ID:</p>
+    <pre id="init-code"></pre>
+  </div>
+
+  <div class="container">
+    <h2>2. Identify User</h2>
+    <p>Identify a user when they log in or sign up:</p>
+    <button onclick="identifyUser()">Identify User</button>
+    <pre id="identify-code"></pre>
+  </div>
+
+  <div class="container">
+    <h2>3. Track Events</h2>
+    <p>Track custom events throughout your app:</p>
+    <button onclick="trackPurchase()">Track Purchase</button>
+    <button onclick="trackButtonClick()">Track Button Click</button>
+    <pre id="track-code"></pre>
+  </div>
+
+  <div class="container">
+    <h2>4. Get Session Info</h2>
+    <button onclick="showSessionInfo()">Show Session Info</button>
+    <pre id="session-code"></pre>
+  </div>
+
+  <script type="module">
+    // Import SDK as ES module
+    import { TappdSDK } from '../dist/index.js';
+    
+    // Initialize SDK
+    const tappd = new TappdSDK({
+      appId: 'YOUR_APP_ID', // Replace with your actual App ID
+      apiUrl: 'https://sdk.gotappd.com/api/v1/sdk',
+      autoTrack: true, // Auto-track page views
+      debug: true // Enable debug logging
+    });
+
+    // Display initialization code
+    document.getElementById('init-code').textContent = `const tappd = new TappdSDK({
+  appId: 'YOUR_APP_ID',
+  apiUrl: 'http://localhost:3001/api/v1/sdk',
+  autoTrack: true,
+  debug: true
+});`;
+
+    // Identify user
+    window.identifyUser = async function() {
+      try {
+        await tappd.identify('user_123', {
+          name: 'John Doe',
+          email: 'john@example.com',
+          phone: '+1234567890',
+          external_id: 'ext_123',
+          age: 28,
+          plan: 'premium'
+        });
+        
+        document.getElementById('identify-code').textContent = `await tappd.identify('user_123', {
+  name: 'John Doe',
+  email: 'john@example.com',
+  phone: '+1234567890',
+  external_id: 'ext_123',
+  age: 28,
+  plan: 'premium'
+});`;
+        
+        alert('User identified successfully!');
+      } catch (error) {
+        console.error('Identify error:', error);
+        alert('Failed to identify user: ' + error.message);
+      }
+    };
+
+    // Track purchase event
+    window.trackPurchase = async function() {
+      try {
+        await tappd.track('purchase', {
+          amount: 99.99,
+          currency: 'USD',
+          product: 'Pro Plan',
+          productId: 'plan_pro_001',
+          category: 'Subscription'
+        });
+        
+        document.getElementById('track-code').textContent = `await tappd.track('purchase', {
+  amount: 99.99,
+  currency: 'USD',
+  product: 'Pro Plan',
+  productId: 'plan_pro_001',
+  category: 'Subscription'
+});`;
+        
+        alert('Purchase event tracked!');
+      } catch (error) {
+        console.error('Track error:', error);
+        alert('Failed to track event: ' + error.message);
+      }
+    };
+
+    // Track button click event
+    window.trackButtonClick = async function() {
+      try {
+        await tappd.track('button_click', {
+          buttonId: 'cta-button',
+          buttonText: 'Get Started',
+          location: 'hero'
+        });
+        
+        alert('Button click tracked!');
+      } catch (error) {
+        console.error('Track error:', error);
+        alert('Failed to track button click: ' + error.message);
+      }
+    };
+
+    // Show session info
+    window.showSessionInfo = function() {
+      const sessionId = tappd.getSessionId();
+      const anonymousId = tappd.getAnonymousId();
+      
+      document.getElementById('session-code').textContent = `Session ID: ${sessionId}
+Anonymous ID: ${anonymousId}
+Page Views: Auto-tracked by SDK
+Session Duration: Tracked automatically`;
+      
+      console.log('Session ID:', sessionId);
+      console.log('Anonymous ID:', anonymousId);
+    };
+
+    // Display tracking code example
+    document.getElementById('track-code').textContent = `await tappd.track('event_name', {
+  property1: 'value1',
+  property2: 'value2'
+});`;
+
+    // Auto-track page view on load
+    console.log('SDK initialized. Page view will be tracked automatically.');
+  </script>
+</body>
+</html>

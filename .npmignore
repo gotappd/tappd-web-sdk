@@ -1,0 +1,15 @@
+node_modules/
+*.log
+.DS_Store
+examples/
+__tests__/
+src/
+tsconfig.json
+webpack.config.js
+USAGE.md
+*.tgz
+.env
+.env.local
+coverage/
+.nyc_output/
+
