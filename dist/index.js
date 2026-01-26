@@ -24,12 +24,17 @@ var __rest = (this && this.__rest) || function (s, e) {
 };
 import { renderMessage } from './renderers/messageRenderer';
 import { getStyles } from './renderers/styles';
+// Global reference to SDK instance for href="tappd.closeIAM()" support
+let globalSDKInstance = null;
 export class TappdSDK {
     constructor(config) {
         this.currentUserId = null;
         this.session = null;
         this.pageTracker = null;
         this.displayedMessages = new Set();
+        this.shownMessages = new Set(); // Track messages shown in any previous session
+        this.messagePageIndices = new Map(); // Track current page index per message
+        this.messageContainers = new Map(); // Track message containers for navigation
         this.messagePollingTimer = null;
         this.activityTimer = null;
         this.lastActivityTime = Date.now();
@@ -72,6 +77,8 @@ export class TappdSDK {
                 yield this.trackBannerDismiss(bannerId, displayId);
             }),
         };
+        // Store global reference for href="tappd.closeIAM()" support
+        globalSDKInstance = this;
         this.appId = config.appId;
         this.apiUrl = config.apiUrl || 'https://sdk.gotappd.com/api/v1/sdk';
         this.autoTrack = config.autoTrack !== false;
@@ -101,6 +108,26 @@ export class TappdSDK {
             this.initializeInAppMessages();
         }
         this.log('[Tappd SDK] Initialized with App ID:', this.appId.substring(0, 15) + '...');
+        // Expose closeIAM, nextPage, previousPage globally for href support
+        if (typeof window !== 'undefined') {
+            window.tappd = {
+                closeIAM: (messageId) => {
+                    if (globalSDKInstance) {
+                        return globalSDKInstance.closeIAM(messageId);
+                    }
+                },
+                nextPage: (messageId) => {
+                    if (globalSDKInstance) {
+                        return globalSDKInstance.nextPage(messageId);
+                    }
+                },
+                previousPage: (messageId) => {
+                    if (globalSDKInstance) {
+                        return globalSDKInstance.previousPage(messageId);
+                    }
+                },
+            };
+        }
     }
     /**
      * Get or create anonymous ID (stored in localStorage)
@@ -365,11 +392,17 @@ export class TappdSDK {
                 // API will create/find customer by external_id and return/create userId
                 const internalUserId = `usr_${attributes.external_id}`;
                 this.currentUserId = internalUserId;
+                // Capture timezone (use provided timezone or detect current)
+                const timezone = (attributes === null || attributes === void 0 ? void 0 : attributes.timezone) || this.getCurrentTimezone();
+                if (timezone) {
+                    this.setStoredTimezone(timezone);
+                }
                 const response = yield this.post('/identify', {
                     external_id: attributes.external_id,
                     name: attributes === null || attributes === void 0 ? void 0 : attributes.name,
                     email: attributes === null || attributes === void 0 ? void 0 : attributes.email,
                     phone: attributes === null || attributes === void 0 ? void 0 : attributes.phone,
+                    timezone: timezone || undefined,
                     // Include anonymousId so the API can merge pre-login events/sessions
                     anonymousId: this.anonymousId,
                     attributes: this.extractCustomAttributes(attributes)
@@ -451,7 +484,7 @@ export class TappdSDK {
      */
     track(eventName, properties) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b;
+            var _a, _b, _c;
             try {
                 // Check if session expired
                 this.checkAndRefreshSession();
@@ -471,6 +504,8 @@ export class TappdSDK {
                 const externalId = this.getExternalId();
                 // Calculate session duration
                 const sessionDuration = this.session ? Math.floor((Date.now() - this.session.startedAt) / 1000) : 0;
+                // Check if timezone has changed (only if user is identified)
+                const timezoneChanged = this.currentUserId ? this.checkTimezoneChange() : null;
                 const response = yield this.post('/track', {
                     eventName,
                     properties: properties || {},
@@ -479,6 +514,7 @@ export class TappdSDK {
                     sessionDuration,
                     userId,
                     external_id: externalId, // Include external_id if available
+                    timezone: timezoneChanged || undefined, // Send timezone if it changed
                     pageUrl,
                     pageTitle,
                     pagePath,
@@ -488,8 +524,26 @@ export class TappdSDK {
                 this.recentEvents.set(eventName, Date.now());
                 // Clean old events (older than 1 hour)
                 this.cleanOldEvents();
-                // Check if any pending messages are waiting for this event
-                this.checkEventTriggers(eventName);
+                // Handle personalized in-app messages returned from trackEvent
+                if (((_c = response === null || response === void 0 ? void 0 : response.data) === null || _c === void 0 ? void 0 : _c.inAppMessages) && Array.isArray(response.data.inAppMessages)) {
+                    this.log(`[Tappd SDK] Received ${response.data.inAppMessages.length} personalized message(s) from event tracking`);
+                    // Add messages to cache
+                    response.data.inAppMessages.forEach((msg) => {
+                        if (msg._id) {
+                            this.messageCache.set(msg._id, msg);
+                        }
+                    });
+                    // Save cache
+                    this.saveMessageCache();
+                    // Display personalized messages immediately
+                    for (const message of response.data.inAppMessages) {
+                        yield this.displayInAppMessage(message);
+                    }
+                }
+                else {
+                    // Check if any pending messages are waiting for this event (fallback)
+                    this.checkEventTriggers(eventName);
+                }
                 this.log('[Tappd SDK] Event tracked:', eventName);
                 return response;
             }
@@ -546,6 +600,8 @@ export class TappdSDK {
                 const externalId = this.getExternalId();
                 // Calculate session duration
                 const sessionDuration = this.session ? Math.floor((Date.now() - this.session.startedAt) / 1000) : 0;
+                // Check if timezone has changed (only if user is identified)
+                const timezoneChanged = this.currentUserId ? this.checkTimezoneChange() : null;
                 const response = yield this.post('/page', {
                     url: currentUrl,
                     path: pagePath,
@@ -556,7 +612,8 @@ export class TappdSDK {
                     sessionStartTime: (_b = this.session) === null || _b === void 0 ? void 0 : _b.startedAt,
                     sessionDuration,
                     userId,
-                    external_id: externalId // Include external_id if available
+                    external_id: externalId, // Include external_id if available
+                    timezone: timezoneChanged || undefined // Send timezone if it changed
                 });
                 this.log('[Tappd SDK] Page view tracked:', currentUrl);
                 return response;
@@ -609,10 +666,59 @@ export class TappdSDK {
         this.log('[Tappd SDK] Reset');
     }
     /**
+     * Get current timezone
+     */
+    getCurrentTimezone() {
+        try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        }
+        catch (error) {
+            this.log('[Tappd SDK] Error getting timezone:', error);
+            return '';
+        }
+    }
+    /**
+     * Get stored timezone from localStorage
+     */
+    getStoredTimezone() {
+        try {
+            return localStorage.getItem('_tappd_timezone');
+        }
+        catch (_a) {
+            return null;
+        }
+    }
+    /**
+     * Store timezone in localStorage
+     */
+    setStoredTimezone(timezone) {
+        try {
+            localStorage.setItem('_tappd_timezone', timezone);
+        }
+        catch (_a) {
+            // localStorage not available
+        }
+    }
+    /**
+     * Check if timezone has changed and return current timezone if changed
+     */
+    checkTimezoneChange() {
+        const currentTimezone = this.getCurrentTimezone();
+        if (!currentTimezone) {
+            return null;
+        }
+        const storedTimezone = this.getStoredTimezone();
+        if (storedTimezone !== currentTimezone) {
+            this.setStoredTimezone(currentTimezone);
+            return currentTimezone;
+        }
+        return null;
+    }
+    /**
      * Extract custom attributes (exclude standard fields)
      */
     extractCustomAttributes(attributes) {
-        const { external_id, name, email, phone } = attributes, custom = __rest(attributes, ["external_id", "name", "email", "phone"]);
+        const { external_id, name, email, phone, timezone } = attributes, custom = __rest(attributes, ["external_id", "name", "email", "phone", "timezone"]);
         return custom;
     }
     /**
@@ -837,9 +943,36 @@ export class TappdSDK {
                     this.messageCache.clear();
                 }
             }
+            // Load shown messages (persisted across sessions)
+            const shownKey = '_tappd_shown_messages';
+            const shownCached = localStorage.getItem(shownKey);
+            if (shownCached) {
+                try {
+                    const shownData = JSON.parse(shownCached);
+                    this.shownMessages = new Set(shownData.messageIds || []);
+                }
+                catch (e) {
+                    this.log('Failed to load shown messages:', e);
+                }
+            }
         }
         catch (e) {
             this.log('Failed to load message cache:', e);
+        }
+    }
+    /**
+     * Save shown messages to localStorage
+     */
+    saveShownMessages() {
+        try {
+            const shownKey = '_tappd_shown_messages';
+            localStorage.setItem(shownKey, JSON.stringify({
+                messageIds: Array.from(this.shownMessages),
+                timestamp: Date.now(),
+            }));
+        }
+        catch (e) {
+            this.log('Failed to save shown messages:', e);
         }
     }
     /**
@@ -1000,12 +1133,23 @@ export class TappdSDK {
                     this.log('[Tappd SDK] Message already displayed:', message._id);
                     return;
                 }
-                // Evaluate trigger (pass message for event trigger registration)
+                // Check if message has been shown before (persisted across sessions)
+                // For immediate triggers, only show again if journey is recurring
                 const triggerConfig = message.triggerConfig || ((_a = message.config) === null || _a === void 0 ? void 0 : _a.triggerConfig);
+                if ((triggerConfig === null || triggerConfig === void 0 ? void 0 : triggerConfig.type) === 'immediate' && this.shownMessages.has(message._id)) {
+                    const isRecurring = message.journeyRecurring === true;
+                    if (!isRecurring) {
+                        this.log('[Tappd SDK] Message already shown and journey is not recurring, skipping:', message._id);
+                        return;
+                    }
+                }
+                // Evaluate trigger (pass message for event trigger registration)
                 if (!this.evaluateTrigger(triggerConfig, message)) {
                     this.log('[Tappd SDK] Trigger condition not met for message:', message._id);
                     return;
                 }
+                // Initialize page index for this message
+                this.messagePageIndices.set(message._id, 0);
                 // Render the message
                 const container = renderMessage(message, {
                     onDismiss: (messageId) => {
@@ -1059,10 +1203,19 @@ export class TappdSDK {
                             }
                         }
                     }),
+                    onNavigatePage: (messageId, pageIndex) => {
+                        this.navigateToPage(messageId, pageIndex);
+                    },
+                    currentPageIndex: this.messagePageIndices.get(message._id) || 0,
                     containerId: this.messageContainerId,
                 });
+                // Store container reference
+                this.messageContainers.set(message._id, container);
                 // Mark as displayed
                 this.displayedMessages.add(message._id);
+                // Mark as shown (persisted across sessions)
+                this.shownMessages.add(message._id);
+                this.saveShownMessages();
                 // Track viewed event
                 yield this.trackMessageEvent(message._id, 'viewed', {});
                 // Mark as delivered in API
@@ -1104,16 +1257,144 @@ export class TappdSDK {
             try {
                 // Remove from displayed set
                 this.displayedMessages.delete(messageId);
+                // Track dismissed event (including close source)
+                yield this.trackMessageEvent(messageId, 'dismissed', {
+                    closeSource: 'programmatic',
+                });
                 // Remove from DOM
                 this.removeMessage(messageId);
-                // Track dismissed event
-                yield this.trackMessageEvent(messageId, 'dismissed', {});
+                // Clean up tracking
+                this.messagePageIndices.delete(messageId);
+                this.messageContainers.delete(messageId);
+                // Track navigation clicks
+                yield this.trackMessageEvent(messageId, 'navigation_click', {
+                    action: 'close',
+                    source: 'dismiss',
+                });
                 // Mark as dismissed in API
                 yield this.markMessageDismissed(messageId);
                 this.log('[Tappd SDK] Message dismissed:', messageId);
             }
             catch (error) {
                 this.log('[Tappd SDK] Dismiss message error:', error);
+            }
+        });
+    }
+    /**
+     * Close IAM (alias for dismissMessage with tracking)
+     */
+    closeIAM(messageId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let targetMessageId = messageId;
+            // If no messageId provided, find currently displayed message
+            if (!targetMessageId) {
+                // Find the first displayed message (typically only one is displayed at a time)
+                const displayedIds = Array.from(this.displayedMessages);
+                if (displayedIds.length > 0) {
+                    targetMessageId = displayedIds[0];
+                }
+                else {
+                    this.log('[Tappd SDK] No message to close');
+                    return;
+                }
+            }
+            // Track close action before dismissing
+            yield this.trackMessageEvent(targetMessageId, 'closed', {
+                closeSource: 'closeIAM_method',
+            });
+            yield this.dismissMessage(targetMessageId);
+        });
+    }
+    /**
+     * Navigate to specific page in a message
+     */
+    navigateToPage(messageId, pageIndex) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const message = this.messageCache.get(messageId);
+            if (!message) {
+                this.log('[Tappd SDK] Message not found for navigation:', messageId);
+                return;
+            }
+            const config = message.config;
+            if (!config.pages || config.pages.length === 0) {
+                this.log('[Tappd SDK] Message has no pages:', messageId);
+                return;
+            }
+            if (pageIndex < 0 || pageIndex >= config.pages.length) {
+                this.log('[Tappd SDK] Invalid page index:', pageIndex);
+                return;
+            }
+            // Update page index
+            this.messagePageIndices.set(messageId, pageIndex);
+            // Track navigation
+            yield this.trackMessageEvent(messageId, 'page_navigated', {
+                pageIndex,
+                totalPages: config.pages.length,
+                action: 'navigate',
+            });
+            // Track navigation click
+            yield this.trackMessageEvent(messageId, 'navigation_click', {
+                action: 'navigate',
+                pageIndex,
+                totalPages: config.pages.length,
+            });
+            // Re-render message with new page
+            const container = this.messageContainers.get(messageId);
+            if (container) {
+                // Remove old container
+                container.remove();
+                this.messageContainers.delete(messageId);
+            }
+            // Re-render message
+            yield this.displayInAppMessage(message);
+        });
+    }
+    /**
+     * Navigate to next page
+     */
+    nextPage(messageId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let targetMessageId = messageId;
+            if (!targetMessageId) {
+                const displayedIds = Array.from(this.displayedMessages);
+                if (displayedIds.length > 0) {
+                    targetMessageId = displayedIds[0];
+                }
+                else {
+                    this.log('[Tappd SDK] No message to navigate');
+                    return;
+                }
+            }
+            const currentPageIndex = this.messagePageIndices.get(targetMessageId) || 0;
+            const message = this.messageCache.get(targetMessageId);
+            if (!message || !message.config.pages) {
+                this.log('[Tappd SDK] Message has no pages');
+                return;
+            }
+            if (currentPageIndex < message.config.pages.length - 1) {
+                yield this.navigateToPage(targetMessageId, currentPageIndex + 1);
+            }
+        });
+    }
+    /**
+     * Navigate to previous page
+     */
+    previousPage(messageId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let targetMessageId = messageId;
+            if (!targetMessageId) {
+                const displayedIds = Array.from(this.displayedMessages);
+                if (displayedIds.length > 0) {
+                    targetMessageId = displayedIds[0];
+                }
+                else {
+                    this.log('[Tappd SDK] No message to navigate');
+                    return;
+                }
+            }
+            const currentPageIndex = this.messagePageIndices.get(targetMessageId) || 0;
+            if (currentPageIndex > 0) {
+                yield this.navigateToPage(targetMessageId, currentPageIndex - 1);
             }
         });
     }
@@ -1276,6 +1557,19 @@ export class TappdSDK {
      */
     evaluateTrigger(triggerConfig, message) {
         if (!triggerConfig || triggerConfig.type === 'immediate') {
+            // For immediate triggers, check if message has been shown before
+            // Only show again if journey is recurring
+            if (message && message._id) {
+                const hasBeenShown = this.shownMessages && this.shownMessages.has(message._id);
+                if (hasBeenShown) {
+                    // Check if journey is recurring - only show again if recurring
+                    const isRecurring = message.journeyRecurring === true;
+                    if (!isRecurring) {
+                        this.log('[Tappd SDK] Message already shown and journey is not recurring, skipping:', message._id);
+                        return false;
+                    }
+                }
+            }
             return true;
         }
         if (triggerConfig.type === 'delay') {
@@ -1392,7 +1686,39 @@ export class TappdSDK {
      * Remove message from DOM
      */
     removeMessage(messageId) {
-        // Try to find the message container
+        // Check stored container first
+        const storedContainer = this.messageContainers.get(messageId);
+        if (storedContainer) {
+            // For popup/modal/fullscreen, container might be inside an overlay
+            const overlay = storedContainer.closest('.tappd-message-overlay');
+            if (overlay) {
+                // Animate out before removing
+                overlay.style.transition = 'opacity 0.2s ease-out';
+                overlay.style.opacity = '0';
+                setTimeout(() => {
+                    overlay.remove();
+                }, 200);
+            }
+            else {
+                // For banners/notifications, just remove the container
+                const htmlContainer = storedContainer;
+                htmlContainer.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+                if (htmlContainer.classList.contains('tappd-message-top')) {
+                    htmlContainer.style.transform = 'translateY(-100%)';
+                }
+                else if (htmlContainer.classList.contains('tappd-message-bottom')) {
+                    htmlContainer.style.transform = 'translateY(100%)';
+                }
+                else {
+                    htmlContainer.style.opacity = '0';
+                }
+                setTimeout(() => {
+                    storedContainer.remove();
+                }, 200);
+            }
+            return;
+        }
+        // Fallback: Try to find the message container by ID
         const container = document.getElementById(`tappd-message-${messageId}`);
         if (container) {
             // For popup/modal, container might be inside an overlay

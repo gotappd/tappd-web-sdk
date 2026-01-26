@@ -121,10 +121,46 @@ export function renderButtonBlock(block, onButtonClick) {
     button.addEventListener('mouseleave', () => {
         button.style.opacity = '1';
     });
-    // Handle click - support bridge actions
+    // Handle click - support bridge actions and href="tappd.closeIAM()"
     button.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        // Check for special href patterns like "tappd.closeIAM()"
+        const link = config.link || '#';
+        if (link.includes('tappd.closeIAM()')) {
+            const messageIdMatch = link.match(/tappd\.closeIAM\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            if (window.tappd && window.tappd.closeIAM) {
+                window.tappd.closeIAM(messageId);
+                if (onButtonClick) {
+                    onButtonClick(link, config.text || '');
+                }
+                return;
+            }
+        }
+        // Check for tappd.nextPage() or tappd.previousPage()
+        if (link.includes('tappd.nextPage()')) {
+            const messageIdMatch = link.match(/tappd\.nextPage\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            if (window.tappd && window.tappd.nextPage) {
+                window.tappd.nextPage(messageId);
+                if (onButtonClick) {
+                    onButtonClick(link, config.text || '');
+                }
+                return;
+            }
+        }
+        if (link.includes('tappd.previousPage()')) {
+            const messageIdMatch = link.match(/tappd\.previousPage\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            if (window.tappd && window.tappd.previousPage) {
+                window.tappd.previousPage(messageId);
+                if (onButtonClick) {
+                    onButtonClick(link, config.text || '');
+                }
+                return;
+            }
+        }
         // Check if action is configured
         if (config.action && config.action.type !== 'none') {
             if (onButtonClick) {
@@ -176,6 +212,44 @@ export function renderHtmlBlock(block) {
     images.forEach((img) => {
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
+    });
+    // Handle href="tappd.closeIAM()" and similar in HTML links/anchor tags
+    const links = container.querySelectorAll('a[href]');
+    links.forEach((link) => {
+        const href = link.getAttribute('href') || '';
+        if (href.includes('tappd.closeIAM()')) {
+            const messageIdMatch = href.match(/tappd\.closeIAM\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.tappd && window.tappd.closeIAM) {
+                    window.tappd.closeIAM(messageId);
+                }
+            });
+        }
+        else if (href.includes('tappd.nextPage()')) {
+            const messageIdMatch = href.match(/tappd\.nextPage\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.tappd && window.tappd.nextPage) {
+                    window.tappd.nextPage(messageId);
+                }
+            });
+        }
+        else if (href.includes('tappd.previousPage()')) {
+            const messageIdMatch = href.match(/tappd\.previousPage\(['"]?([^'")]*)['"]?\)/);
+            const messageId = messageIdMatch ? messageIdMatch[1] : undefined;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.tappd && window.tappd.previousPage) {
+                    window.tappd.previousPage(messageId);
+                }
+            });
+        }
     });
     return container;
 }

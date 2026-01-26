@@ -41,6 +41,9 @@ export declare class TappdSDK {
     private session;
     private pageTracker;
     private displayedMessages;
+    private shownMessages;
+    private messagePageIndices;
+    private messageContainers;
     private messagePollingTimer;
     private activityTimer;
     private lastActivityTime;
@@ -153,6 +156,22 @@ export declare class TappdSDK {
      */
     reset(): void;
     /**
+     * Get current timezone
+     */
+    private getCurrentTimezone;
+    /**
+     * Get stored timezone from localStorage
+     */
+    private getStoredTimezone;
+    /**
+     * Store timezone in localStorage
+     */
+    private setStoredTimezone;
+    /**
+     * Check if timezone has changed and return current timezone if changed
+     */
+    private checkTimezoneChange;
+    /**
      * Extract custom attributes (exclude standard fields)
      */
     private extractCustomAttributes;
@@ -196,6 +215,10 @@ export declare class TappdSDK {
      */
     private loadMessageCache;
     /**
+     * Save shown messages to localStorage
+     */
+    private saveShownMessages;
+    /**
      * Save messages to localStorage cache
      */
     private saveMessageCache;
@@ -216,6 +239,22 @@ export declare class TappdSDK {
      * Dismiss an in-app message
      */
     dismissMessage(messageId: string): Promise<void>;
+    /**
+     * Close IAM (alias for dismissMessage with tracking)
+     */
+    closeIAM(messageId?: string): Promise<void>;
+    /**
+     * Navigate to specific page in a message
+     */
+    navigateToPage(messageId: string, pageIndex: number): Promise<void>;
+    /**
+     * Navigate to next page
+     */
+    nextPage(messageId?: string): Promise<void>;
+    /**
+     * Navigate to previous page
+     */
+    previousPage(messageId?: string): Promise<void>;
     /**
      * Track message event
      */

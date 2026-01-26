@@ -1,9 +1,10 @@
 /**
  * Type definitions for In-App Messages
  */
-export type InAppMessageType = 'banner' | 'popup' | 'modal';
+export type InAppMessageType = 'banner' | 'popup' | 'modal' | 'full_screen' | 'notification';
 export type BannerPosition = 'top' | 'bottom' | 'center';
 export type AnimationType = 'slide' | 'fade' | 'none';
+export type NotificationAnimationDirection = 'up' | 'down' | 'left' | 'right';
 export type Alignment = 'left' | 'center' | 'right' | 'full' | 'justify';
 export type BlockType = 'image' | 'text' | 'button' | 'html';
 export interface ImageBlockConfig {
@@ -108,8 +109,12 @@ export interface InAppMessageConfig {
     backgroundColor?: string;
     dismissible?: boolean;
     closeButton?: boolean;
+    showCloseButton?: boolean;
+    showNavigationButtons?: boolean;
     overlay?: boolean;
     overlayOpacity?: number;
+    notificationAnimation?: NotificationAnimationDirection;
+    notificationPosition?: 'top' | 'bottom' | 'left' | 'right';
     containerSettings?: MessageContainerSettings;
     contentSettings?: ContentSettings;
     triggerConfig?: TriggerConfig;
@@ -133,5 +138,6 @@ export interface InAppMessage {
     dismissedAt?: Date | string;
     createdAt?: Date | string;
     updatedAt?: Date | string;
+    journeyRecurring?: boolean;
 }
 //# sourceMappingURL=inAppMessage.d.ts.map

@@ -554,6 +554,9 @@ function renderFullScreen(
     navContainer.style.gap = '10px';
     navContainer.style.zIndex = '10';
 
+    const pagesLength = config.pages.length;
+    const lastPageIndex = pagesLength - 1;
+
     const prevButton = document.createElement('button');
     prevButton.textContent = '← Previous';
     prevButton.disabled = currentPageIndex === 0;
@@ -568,12 +571,12 @@ function renderFullScreen(
 
     const nextButton = document.createElement('button');
     nextButton.textContent = 'Next →';
-    nextButton.disabled = currentPageIndex >= config.pages.length - 1;
+    nextButton.disabled = currentPageIndex >= lastPageIndex;
     nextButton.style.padding = '8px 16px';
-    nextButton.style.cursor = currentPageIndex >= config.pages.length - 1 ? 'not-allowed' : 'pointer';
-    nextButton.style.opacity = currentPageIndex >= config.pages.length - 1 ? '0.5' : '1';
+    nextButton.style.cursor = currentPageIndex >= lastPageIndex ? 'not-allowed' : 'pointer';
+    nextButton.style.opacity = currentPageIndex >= lastPageIndex ? '0.5' : '1';
     nextButton.addEventListener('click', () => {
-      if (currentPageIndex < config.pages.length - 1 && options.onNavigatePage) {
+      if (currentPageIndex < lastPageIndex && options.onNavigatePage) {
         options.onNavigatePage(message._id, currentPageIndex + 1);
       }
     });
