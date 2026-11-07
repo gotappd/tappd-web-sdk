@@ -24,15 +24,21 @@ var __rest = (this && this.__rest) || function (s, e) {
 };
 import { renderMessage } from './renderers/messageRenderer';
 import { getStyles } from './renderers/styles';
+import { CUSTOMER_SYSTEM_ATTRIBUTE_KEYS, CUSTOMER_SYSTEM_ATTRIBUTE_KEY_LIST, } from './customerSystemAttributeKeys';
+import { recordLocalTouch, getTouchesForConversion, flushAttributionSync, syncIdentifyMerge, } from './attributionStore';
+import { sortInAppMessagesByPriority } from './iamDisplayPriority';
 // Global reference to SDK instance for href="tappd.closeIAM()" support
 let globalSDKInstance = null;
 export class TappdSDK {
     constructor(config) {
+        var _a, _b;
         this.currentUserId = null;
         this.session = null;
         this.pageTracker = null;
         this.displayedMessages = new Set();
         this.shownMessages = new Set(); // Track messages shown in any previous session
+        /** One-at-a-time IAM queue lock — id of the message currently on screen. */
+        this.activeMessageId = null;
         this.messagePageIndices = new Map(); // Track current page index per message
         this.messageContainers = new Map(); // Track message containers for navigation
         this.messagePollingTimer = null;
@@ -87,7 +93,10 @@ export class TappdSDK {
         this.debug = config.debug || false;
         this.enableInAppMessages = config.enableInAppMessages !== false;
         this.autoDisplayMessages = config.autoDisplayMessages !== false;
-        this.messagePollingInterval = config.messagePollingInterval || 300; // Default: 5 minutes (300 seconds)
+        this.messagePollingInterval = (_a = config.messagePollingInterval) !== null && _a !== void 0 ? _a : 60; // Default: 60s — frequent enough for test IAM
+        this.minMessagePollingIntervalSeconds = Math.max(5, (_b = config.minMessagePollingIntervalSeconds) !== null && _b !== void 0 ? _b : 15);
+        this.messageFetchDedupeMs =
+            config.messageFetchDedupeMs !== undefined ? Math.max(0, config.messageFetchDedupeMs) : 2000;
         this.inactivityThreshold = (config.inactivityThreshold || 300) * 1000; // Convert to milliseconds, default: 5 minutes
         this.messageContainerId = config.messageContainerId;
         if (!this.appId) {
@@ -107,6 +116,8 @@ export class TappdSDK {
         if (this.enableInAppMessages) {
             this.initializeInAppMessages();
         }
+        // Attribution: flush offline queue when back online / on init
+        this.setupAttributionSync();
         this.log('[Tappd SDK] Initialized with App ID:', this.appId.substring(0, 15) + '...');
         // Expose closeIAM, nextPage, previousPage globally for href support
         if (typeof window !== 'undefined') {
@@ -142,7 +153,8 @@ export class TappdSDK {
         return anonymousId;
     }
     /**
-     * Start a new session (client-side only)
+     * Start a new session (client-side) and persist to server/ClickHouse.
+     * Does not require identify — anonymousId is enough for Session Analytics totals.
      */
     startNewSession() {
         const sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
@@ -152,6 +164,30 @@ export class TappdSDK {
             lastActivityAt: Date.now()
         };
         this.log('[Tappd SDK] New session started:', sessionId.substring(0, 15));
+        this.persistSessionStart().catch((err) => {
+            this.log('[Tappd SDK] session/start failed:', err);
+        });
+    }
+    persistSessionStart() {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.session)
+                return;
+            const externalId = this.getExternalId();
+            yield this.post('/session/start', Object.assign({ sessionId: this.session.sessionId, anonymousId: this.anonymousId, userId: this.currentUserId || undefined, external_id: externalId || undefined, startedAt: this.session.startedAt, referrer: typeof document !== 'undefined' ? document.referrer : undefined }, this.getDeviceInfo()));
+        });
+    }
+    persistSessionHeartbeat() {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.session)
+                return;
+            const externalId = this.getExternalId();
+            yield this.post('/session/heartbeat', {
+                sessionId: this.session.sessionId,
+                anonymousId: this.anonymousId,
+                userId: this.currentUserId || undefined,
+                external_id: externalId || undefined,
+            });
+        });
     }
     /**
      * Check if session has expired and start a new one if needed
@@ -197,14 +233,22 @@ export class TappdSDK {
      * Handle visibility changes (page hidden/shown)
      */
     handleVisibilityChange() {
+        var _a;
         if (document.hidden) {
             // Page went to background - session is paused
             this.log('[Tappd SDK] Page hidden - session paused');
             // Can optionally send a "session paused" event here
         }
         else {
-            // Page came to foreground - check if session expired
+            // Page came to foreground — refresh session lifecycle / lastSeen
+            const previousSessionId = (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId;
             this.checkAndRefreshSession();
+            this.updateSessionActivity();
+            if (this.session && this.session.sessionId === previousSessionId) {
+                this.persistSessionHeartbeat().catch((err) => {
+                    this.log('[Tappd SDK] session/heartbeat failed:', err);
+                });
+            }
             // Track page view on visibility
             this.trackPageView();
         }
@@ -375,13 +419,69 @@ export class TappdSDK {
             return 'mobile';
         return 'desktop';
     }
+    /** Normalize navigator.language style tags to e.g. en_AU */
+    normalizeLocaleTag(raw) {
+        var _a;
+        const s = raw.trim();
+        const seg = s.split(/[-_]/).filter(Boolean);
+        if (seg.length >= 2) {
+            return `${seg[0].toLowerCase()}_${seg[seg.length - 1].toUpperCase()}`;
+        }
+        return ((_a = seg[0]) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || '';
+    }
+    inferLocaleTag() {
+        if (typeof navigator === 'undefined' || !navigator.language)
+            return undefined;
+        const n = this.normalizeLocaleTag(navigator.language);
+        return n || undefined;
+    }
+    getDefaultLastDeviceName() {
+        const d = this.getDeviceInfo();
+        return `${d.browser.name} ${d.browser.version} / ${d.os.name}`;
+    }
+    buildSystemAttributesPayload(attributes) {
+        const K = CUSTOMER_SYSTEM_ATTRIBUTE_KEYS;
+        const allowed = new Set([...CUSTOMER_SYSTEM_ATTRIBUTE_KEY_LIST]);
+        const out = {};
+        if (attributes.systemAttributes) {
+            for (const [key, val] of Object.entries(attributes.systemAttributes)) {
+                if (val === undefined || val === null)
+                    continue;
+                if (!allowed.has(key))
+                    continue;
+                out[key] = String(val);
+            }
+        }
+        const tz = attributes.timezone || this.getCurrentTimezone();
+        if (tz)
+            out[K.TIMEZONE] = String(tz);
+        if (attributes.locale) {
+            out[K.LOCALE] = String(attributes.locale);
+        }
+        else if (!out[K.LOCALE]) {
+            const auto = this.inferLocaleTag();
+            if (auto)
+                out[K.LOCALE] = auto;
+        }
+        if (attributes.country)
+            out[K.COUNTRY] = String(attributes.country);
+        if (attributes.city)
+            out[K.CITY] = String(attributes.city);
+        const deviceLabel = attributes.last_device_name ||
+            attributes.deviceName ||
+            out[K.LAST_DEVICE_NAME] ||
+            this.getDefaultLastDeviceName();
+        if (deviceLabel)
+            out[K.LAST_DEVICE_NAME] = String(deviceLabel);
+        return Object.keys(out).length ? out : undefined;
+    }
     /**
      * Identify a user
      * Requires external_id in attributes - SDK will generate internal userId automatically
      */
     identify(attributes) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
+            var _a, _b;
             try {
                 if (!(attributes === null || attributes === void 0 ? void 0 : attributes.external_id)) {
                     throw new Error('external_id is required in attributes');
@@ -397,21 +497,30 @@ export class TappdSDK {
                 if (timezone) {
                     this.setStoredTimezone(timezone);
                 }
-                const response = yield this.post('/identify', {
-                    external_id: attributes.external_id,
-                    name: attributes === null || attributes === void 0 ? void 0 : attributes.name,
-                    email: attributes === null || attributes === void 0 ? void 0 : attributes.email,
-                    phone: attributes === null || attributes === void 0 ? void 0 : attributes.phone,
-                    timezone: timezone || undefined,
+                const systemAttributes = this.buildSystemAttributesPayload(attributes);
+                const response = yield this.post('/identify', Object.assign(Object.assign({ external_id: attributes.external_id, name: attributes === null || attributes === void 0 ? void 0 : attributes.name, email: attributes === null || attributes === void 0 ? void 0 : attributes.email, phone: attributes === null || attributes === void 0 ? void 0 : attributes.phone, timezone: timezone || undefined }, (systemAttributes ? { systemAttributes } : {})), { 
                     // Include anonymousId so the API can merge pre-login events/sessions
-                    anonymousId: this.anonymousId,
-                    attributes: this.extractCustomAttributes(attributes)
-                });
+                    anonymousId: this.anonymousId, attributes: this.extractCustomAttributes(attributes) }));
                 // Store the returned userId if API generates one
                 if ((_a = response === null || response === void 0 ? void 0 : response.data) === null || _a === void 0 ? void 0 : _a.userId) {
                     this.currentUserId = response.data.userId;
                 }
+                try {
+                    yield syncIdentifyMerge((path, body) => this.post(path, body), {
+                        anonymousId: this.anonymousId,
+                        userId: this.currentUserId,
+                        externalId: attributes.external_id,
+                        customerId: (_b = response === null || response === void 0 ? void 0 : response.data) === null || _b === void 0 ? void 0 : _b.customerId,
+                    });
+                    yield this.flushAttribution();
+                }
+                catch (attrErr) {
+                    this.log('[Tappd SDK] Attribution identify-merge error:', attrErr);
+                }
                 this.log('[Tappd SDK] Customer identified:', attributes.external_id);
+                this.persistSessionHeartbeat().catch((err) => {
+                    this.log('[Tappd SDK] session/heartbeat after identify failed:', err);
+                });
                 // After identification, fetch messages immediately
                 if (this.enableInAppMessages && this.autoDisplayMessages) {
                     setTimeout(() => {
@@ -514,11 +623,13 @@ export class TappdSDK {
                     sessionDuration,
                     userId,
                     external_id: externalId, // Include external_id if available
+                    anonymousId: this.anonymousId,
                     timezone: timezoneChanged || undefined, // Send timezone if it changed
                     pageUrl,
                     pageTitle,
                     pagePath,
-                    referrer
+                    referrer,
+                    attributionTouches: getTouchesForConversion(),
                 });
                 // Store event for trigger evaluation
                 this.recentEvents.set(eventName, Date.now());
@@ -535,10 +646,8 @@ export class TappdSDK {
                     });
                     // Save cache
                     this.saveMessageCache();
-                    // Display personalized messages immediately
-                    for (const message of response.data.inAppMessages) {
-                        yield this.displayInAppMessage(message);
-                    }
+                    // Queue: show at most one (highest priority eligible)
+                    yield this.displayPendingMessages(false);
                 }
                 else {
                     // Check if any pending messages are waiting for this event (fallback)
@@ -559,8 +668,88 @@ export class TappdSDK {
      */
     trackPushInteraction(type, properties) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            const deliveryLogId = (properties === null || properties === void 0 ? void 0 : properties.deliveryLogId) ? String(properties.deliveryLogId) : undefined;
+            const messageId = (properties === null || properties === void 0 ? void 0 : properties.messageId)
+                ? String(properties.messageId)
+                : deliveryLogId;
+            recordLocalTouch({
+                channel: 'push',
+                touchType: type === 'clicked' ? 'click' : 'impression',
+                messageId,
+                deliveryLogId,
+                journeyId: (properties === null || properties === void 0 ? void 0 : properties.journeyId) ? String(properties.journeyId) : undefined,
+                enrollmentId: (properties === null || properties === void 0 ? void 0 : properties.enrollmentId) ? String(properties.enrollmentId) : undefined,
+                stepId: (properties === null || properties === void 0 ? void 0 : properties.stepId) ? String(properties.stepId) : undefined,
+                source: 'push',
+                sessionId: (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId,
+                isTest: !!(properties === null || properties === void 0 ? void 0 : properties.isTest),
+            });
+            // Prefer dedicated push interactions endpoint when deliveryLogId is present
+            if (deliveryLogId) {
+                try {
+                    yield this.post('/push/interactions', {
+                        type,
+                        deliveryLogId,
+                        enrollmentId: properties === null || properties === void 0 ? void 0 : properties.enrollmentId,
+                        journeyId: properties === null || properties === void 0 ? void 0 : properties.journeyId,
+                        stepId: properties === null || properties === void 0 ? void 0 : properties.stepId,
+                        customerId: properties === null || properties === void 0 ? void 0 : properties.customerId,
+                        providerMessageId: properties === null || properties === void 0 ? void 0 : properties.providerMessageId,
+                        platform: properties === null || properties === void 0 ? void 0 : properties.platform,
+                        deviceId: properties === null || properties === void 0 ? void 0 : properties.deviceId,
+                        anonymousId: this.anonymousId,
+                        metadata: properties || {},
+                    });
+                    yield this.flushAttribution();
+                    return;
+                }
+                catch (err) {
+                    this.log('[Tappd SDK] Push interactions endpoint error, falling back to track:', err);
+                }
+            }
             const eventName = `push_notification.${type}`;
             yield this.track(eventName, properties);
+            yield this.flushAttribution();
+        });
+    }
+    /**
+     * Record a content-card click for attribution.
+     */
+    recordCardClick(params) {
+        var _a;
+        const touch = recordLocalTouch({
+            channel: 'card',
+            touchType: 'click',
+            messageId: params.messageId,
+            deliveryLogId: params.deliveryLogId,
+            journeyId: params.journeyId,
+            enrollmentId: params.enrollmentId,
+            stepId: params.stepId,
+            source: 'card',
+            sessionId: (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId,
+            isTest: params.isTest,
+        });
+        this.flushAttribution().catch(() => { });
+        return touch;
+    }
+    setupAttributionSync() {
+        if (typeof window === 'undefined')
+            return;
+        const flush = () => {
+            this.flushAttribution().catch(() => { });
+        };
+        window.addEventListener('online', flush);
+        // Initial flush shortly after init
+        setTimeout(flush, 1500);
+    }
+    flushAttribution() {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield flushAttributionSync((path, body) => this.post(path, body), {
+                anonymousId: this.anonymousId,
+                userId: this.currentUserId,
+                externalId: this.getExternalId(),
+            });
         });
     }
     /**
@@ -718,7 +907,7 @@ export class TappdSDK {
      * Extract custom attributes (exclude standard fields)
      */
     extractCustomAttributes(attributes) {
-        const { external_id, name, email, phone, timezone } = attributes, custom = __rest(attributes, ["external_id", "name", "email", "phone", "timezone"]);
+        const { external_id, name, email, phone, timezone, locale, country, city, last_device_name, deviceName, systemAttributes } = attributes, custom = __rest(attributes, ["external_id", "name", "email", "phone", "timezone", "locale", "country", "city", "last_device_name", "deviceName", "systemAttributes"]);
         return custom;
     }
     /**
@@ -801,10 +990,8 @@ export class TappdSDK {
             this.log('[Tappd SDK] Polling stopped - user inactive');
             return;
         }
-        // Reduced polling frequency - now 5 minutes (300s) instead of 30s
-        // Primary sync happens on app launch, polling is just a fallback
-        const pollingInterval = Math.max(this.messagePollingInterval, 300); // Minimum 5 minutes
-        this.log('[Tappd SDK] Starting message polling (fallback, interval: ' + pollingInterval + 's)');
+        const pollingInterval = Math.max(this.messagePollingInterval, this.minMessagePollingIntervalSeconds);
+        this.log('[Tappd SDK] Starting message polling (interval: ' + pollingInterval + 's)');
         this.messagePollingTimer = window.setInterval(() => {
             // Check if user is still active before polling
             if (this.isUserActive) {
@@ -1018,9 +1205,12 @@ export class TappdSDK {
                     this.saveMessageCache();
                 }
             }
-            // Use cache if not forcing refresh and we have valid messages
-            if (!forceRefresh && validCachedMessages.length > 0) {
-                this.log('[Tappd SDK] Using cached messages');
+            // Dedupe rapid repeat calls only (never skip network just because cache is non-empty — new pending IAMs must be fetched).
+            if (!forceRefresh &&
+                this.messageFetchDedupeMs > 0 &&
+                this.lastFetchTime > 0 &&
+                Date.now() - this.lastFetchTime < this.messageFetchDedupeMs) {
+                this.log('[Tappd SDK] Using cached messages (fetch dedupe window)');
                 return validCachedMessages;
             }
             // Fetch from API
@@ -1119,24 +1309,34 @@ export class TappdSDK {
     /**
      * Display a single in-app message
      */
-    displayInAppMessage(message) {
+    displayInAppMessage(message, options) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a;
             try {
+                const forceDisplay = (options === null || options === void 0 ? void 0 : options.forceDisplay) === true;
+                const isTest = message.isTest === true;
+                // One-at-a-time queue: skip if another message is already on screen
+                if (this.activeMessageId && !forceDisplay && !isTest) {
+                    this.log('[Tappd SDK] Another message is active, deferring:', message._id);
+                    return;
+                }
                 // Check if message has expired
                 if (this.checkMessageExpiration(message)) {
                     this.log('[Tappd SDK] Message expired, skipping:', message._id);
                     return;
                 }
                 // Check if message is already displayed
-                if (this.displayedMessages.has(message._id)) {
+                if (!forceDisplay && !isTest && this.displayedMessages.has(message._id)) {
                     this.log('[Tappd SDK] Message already displayed:', message._id);
                     return;
                 }
                 // Check if message has been shown before (persisted across sessions)
                 // For immediate triggers, only show again if journey is recurring
                 const triggerConfig = message.triggerConfig || ((_a = message.config) === null || _a === void 0 ? void 0 : _a.triggerConfig);
-                if ((triggerConfig === null || triggerConfig === void 0 ? void 0 : triggerConfig.type) === 'immediate' && this.shownMessages.has(message._id)) {
+                if (!forceDisplay &&
+                    !isTest &&
+                    (triggerConfig === null || triggerConfig === void 0 ? void 0 : triggerConfig.type) === 'immediate' &&
+                    this.shownMessages.has(message._id)) {
                     const isRecurring = message.journeyRecurring === true;
                     if (!isRecurring) {
                         this.log('[Tappd SDK] Message already shown and journey is not recurring, skipping:', message._id);
@@ -1144,12 +1344,14 @@ export class TappdSDK {
                     }
                 }
                 // Evaluate trigger (pass message for event trigger registration)
-                if (!this.evaluateTrigger(triggerConfig, message)) {
+                if (!forceDisplay && !this.evaluateTrigger(triggerConfig, message)) {
                     this.log('[Tappd SDK] Trigger condition not met for message:', message._id);
                     return;
                 }
                 // Initialize page index for this message
                 this.messagePageIndices.set(message._id, 0);
+                // Lock queue before render
+                this.activeMessageId = message._id;
                 // Render the message
                 const container = renderMessage(message, {
                     onDismiss: (messageId) => {
@@ -1206,6 +1408,12 @@ export class TappdSDK {
                     onNavigatePage: (messageId, pageIndex) => {
                         this.navigateToPage(messageId, pageIndex);
                     },
+                    onFormSubmit: (messageId, formData, submitAction) => __awaiter(this, void 0, void 0, function* () {
+                        yield this.trackMessageEvent(messageId, 'form_submitted', {
+                            fieldKeys: Object.keys(formData || {}),
+                        });
+                        yield this.captureFormData(messageId, formData, submitAction);
+                    }),
                     currentPageIndex: this.messagePageIndices.get(message._id) || 0,
                     containerId: this.messageContainerId,
                 });
@@ -1223,7 +1431,61 @@ export class TappdSDK {
                 this.log('[Tappd SDK] Message displayed:', message._id);
             }
             catch (error) {
+                if (this.activeMessageId === (message === null || message === void 0 ? void 0 : message._id)) {
+                    this.activeMessageId = null;
+                }
                 this.log('[Tappd SDK] Display message error:', error);
+            }
+        });
+    }
+    /**
+     * Pick the highest-priority eligible message for the one-at-a-time queue.
+     * Does not display — caller must call displayInAppMessage.
+     */
+    pickNextEligibleMessage(messages) {
+        const candidates = messages.filter((msg) => {
+            var _a;
+            if (!msg || !msg._id)
+                return false;
+            if (this.displayedMessages.has(msg._id))
+                return false;
+            if (this.checkMessageExpiration(msg))
+                return false;
+            // Already shown — skip unless recurring journey allows re-display
+            if (this.shownMessages.has(msg._id) && msg.journeyRecurring !== true) {
+                return false;
+            }
+            const triggerConfig = msg.triggerConfig || ((_a = msg.config) === null || _a === void 0 ? void 0 : _a.triggerConfig);
+            return this.evaluateTrigger(triggerConfig, msg);
+        });
+        if (candidates.length === 0)
+            return null;
+        const sorted = sortInAppMessagesByPriority(candidates);
+        return sorted[0] || null;
+    }
+    /**
+     * Trigger a specific in-app message by ID (e.g. from push payload).
+     * Uses the existing getInAppMessages + displayInAppMessage pipeline so
+     * triggers, expiration, and tracking behavior stay consistent.
+     */
+    triggerInAppMessageById(messageId_1) {
+        return __awaiter(this, arguments, void 0, function* (messageId, forceRefresh = true, options) {
+            try {
+                const forceDisplay = (options === null || options === void 0 ? void 0 : options.forceDisplay) === true;
+                if (this.activeMessageId && !forceDisplay) {
+                    this.log('[Tappd SDK] triggerInAppMessageById deferred — another message is active');
+                    return;
+                }
+                const messages = yield this.getInAppMessages(forceRefresh);
+                const target = messages.find((msg) => msg && (msg._id === messageId || msg.id === messageId));
+                if (!target) {
+                    this.log('[Tappd SDK] triggerInAppMessageById: no message found for id:', messageId);
+                    return;
+                }
+                yield this.displayInAppMessage(target, options);
+            }
+            catch (error) {
+                this.log('[Tappd SDK] triggerInAppMessageById error:', error);
             }
         });
     }
@@ -1236,17 +1498,28 @@ export class TappdSDK {
                 return;
             }
             try {
+                // One-at-a-time: wait until the active message is dismissed
+                if (this.activeMessageId) {
+                    this.log('[Tappd SDK] Display pending skipped — message already active:', this.activeMessageId);
+                    return;
+                }
                 const messages = yield this.getInAppMessages(forceRefresh);
-                // Filter out already displayed messages
-                const newMessages = messages.filter((msg) => !this.displayedMessages.has(msg._id));
-                // Display messages one by one (or could display multiple)
-                for (const message of newMessages) {
-                    yield this.displayInAppMessage(message);
+                const candidate = this.pickNextEligibleMessage(messages);
+                if (candidate) {
+                    yield this.displayInAppMessage(candidate);
                 }
             }
             catch (error) {
                 this.log('[Tappd SDK] Display pending messages error:', error);
             }
+        });
+    }
+    /**
+     * Force-fetch pending IAM from the API and display any new ones. Call after identify or when you need fresh messages (e.g. after dashboard test send).
+     */
+    syncInAppMessages() {
+        return __awaiter(this, void 0, void 0, function* () {
+            return this.displayPendingMessages(true);
         });
     }
     /**
@@ -1273,9 +1546,17 @@ export class TappdSDK {
                 });
                 // Mark as dismissed in API
                 yield this.markMessageDismissed(messageId);
+                // Release queue lock and try next eligible message
+                if (this.activeMessageId === messageId) {
+                    this.activeMessageId = null;
+                }
+                yield this.displayPendingMessages(false);
                 this.log('[Tappd SDK] Message dismissed:', messageId);
             }
             catch (error) {
+                if (this.activeMessageId === messageId) {
+                    this.activeMessageId = null;
+                }
                 this.log('[Tappd SDK] Dismiss message error:', error);
             }
         });
@@ -1346,7 +1627,7 @@ export class TappdSDK {
                 this.messageContainers.delete(messageId);
             }
             // Re-render message
-            yield this.displayInAppMessage(message);
+            yield this.displayInAppMessage(message, { forceDisplay: true });
         });
     }
     /**
@@ -1403,11 +1684,58 @@ export class TappdSDK {
      */
     trackMessageEvent(messageId, eventType, metadata) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
+                if (eventType === 'clicked') {
+                    const cached = this.messageCache.get(messageId);
+                    recordLocalTouch({
+                        channel: 'in_app_message',
+                        touchType: 'click',
+                        messageId,
+                        deliveryLogId: (metadata === null || metadata === void 0 ? void 0 : metadata.deliveryLogId) || (cached === null || cached === void 0 ? void 0 : cached.deliveryLogId),
+                        journeyId: (metadata === null || metadata === void 0 ? void 0 : metadata.journeyId) || (cached === null || cached === void 0 ? void 0 : cached.journeyId),
+                        enrollmentId: (metadata === null || metadata === void 0 ? void 0 : metadata.enrollmentId) || (cached === null || cached === void 0 ? void 0 : cached.enrollmentId),
+                        stepId: (metadata === null || metadata === void 0 ? void 0 : metadata.stepId) || (cached === null || cached === void 0 ? void 0 : cached.stepId),
+                        source: 'iam',
+                        sessionId: (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId,
+                    });
+                }
                 yield this.track(`message.${eventType}`, Object.assign({ messageId }, metadata));
+                // Promote impressions/clicks to first-class delivery-log status (opened/clicked)
+                // so in-app message reporting matches push/email.
+                if (eventType === 'viewed') {
+                    yield this.markMessageInteraction(messageId, 'opened');
+                }
+                else if (eventType === 'clicked') {
+                    yield this.markMessageInteraction(messageId, 'clicked');
+                    yield this.flushAttribution();
+                }
             }
             catch (error) {
                 this.log('[Tappd SDK] Track message event error:', error);
+            }
+        });
+    }
+    /**
+     * Promote an in-app message open/click to the server delivery log.
+     */
+    markMessageInteraction(messageId, type) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const response = yield fetch(`${this.apiUrl}/in-app-messages/${messageId}/interactions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-App-Id': this.appId,
+                    },
+                    body: JSON.stringify({ type }),
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.statusText}`);
+                }
+            }
+            catch (error) {
+                this.log('[Tappd SDK] Mark message interaction error:', error);
             }
         });
     }
@@ -1666,13 +1994,14 @@ export class TappdSDK {
                     }
                 }
             }
-            // Display messages that were waiting for this event
-            for (const message of messagesToDisplay) {
-                yield this.displayInAppMessage(message);
+            // Display highest-priority waiting message (one-at-a-time queue)
+            if (messagesToDisplay.length > 0 && !this.activeMessageId) {
+                const sorted = sortInAppMessagesByPriority(messagesToDisplay);
+                yield this.displayInAppMessage(sorted[0]);
             }
             // Remove displayed messages from waiting list
             for (const messageId of waitingMessageIds) {
-                if (this.displayedMessages.has(messageId)) {
+                if (this.displayedMessages.has(messageId) || this.shownMessages.has(messageId)) {
                     waitingMessageIds.delete(messageId);
                 }
             }
@@ -1929,6 +2258,32 @@ export class TappdSDK {
                 this.log('Error unsubscribing from push:', error);
                 throw error;
             }
+        });
+    }
+    /**
+     * Open the workspace preference center for the identified customer.
+     * Requests a signed URL from the SDK API and opens it in a new tab / same window.
+     */
+    openPreferenceCenter() {
+        return __awaiter(this, arguments, void 0, function* (options = {}) {
+            var _a;
+            const externalId = this.getExternalId();
+            if (!externalId) {
+                throw new Error('Customer must be identified before opening preference center');
+            }
+            const res = yield this.post('/preference-center/open', {
+                external_id: externalId,
+                preferenceCenterId: options.preferenceCenterId || undefined,
+            });
+            const url = (_a = res === null || res === void 0 ? void 0 : res.data) === null || _a === void 0 ? void 0 : _a.url;
+            if (!url) {
+                throw new Error((res === null || res === void 0 ? void 0 : res.error) || 'Failed to open preference center');
+            }
+            const target = options.target || '_blank';
+            if (typeof window !== 'undefined') {
+                window.open(url, target, 'noopener,noreferrer');
+            }
+            return url;
         });
     }
     /**
@@ -2411,6 +2766,35 @@ export class TappdSDK {
             catch (error) {
                 this.log('[Tappd SDK] Track banner click error:', error);
             }
+        });
+    }
+    /**
+     * Landing pages: identify the visitor, record landing_page.viewed, and bump page analytics.
+     */
+    initLandingPage(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+            const utm = {};
+            ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach((key) => {
+                const value = params.get(key);
+                if (value)
+                    utm[key] = value;
+            });
+            const externalId = this.getExternalId() || `lpv_${this.anonymousId || options.visitorId || 'visitor'}`;
+            yield this.identify(Object.assign({ external_id: externalId, lastLandingPageId: options.landingPageId, lastLandingPageSlug: options.slug }, utm));
+            yield this.track('landing_page.viewed', Object.assign({ landingPageId: options.landingPageId, slug: options.slug, referrer: typeof document !== 'undefined' ? document.referrer : '' }, utm));
+            const visitorId = options.visitorId || externalId;
+            yield fetch(`${this.apiUrl}/public/landing-pages/${encodeURIComponent(options.workspaceSlug)}/${encodeURIComponent(options.slug)}/view`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    analyticsOnly: true,
+                    visitorId,
+                    externalId,
+                    referrer: typeof document !== 'undefined' ? document.referrer : '',
+                    utm,
+                }),
+            });
         });
     }
     /**

@@ -1,6 +1,6 @@
 /**
  * Message Renderer for In-App Messages
- * Renders message containers (banner, popup, modal)
+ * Layout values come from resolveIamCanvasLayout (dashboard preview parity).
  */
 import type { InAppMessage } from '../types/inAppMessage';
 interface RenderOptions {
@@ -11,9 +11,6 @@ interface RenderOptions {
     containerId?: string;
     currentPageIndex?: number;
 }
-/**
- * Render a message based on its type
- */
 export declare function renderMessage(message: InAppMessage, options?: RenderOptions): HTMLElement;
 export {};
 //# sourceMappingURL=messageRenderer.d.ts.map

@@ -1,8 +1,11 @@
 /**
  * Block Renderer for In-App Messages
- * Renders individual blocks (image, text, button, HTML)
  */
 import type { Block } from '../types/inAppMessage';
+export interface BlockRenderCallbacks {
+    onButtonClick?: (link: string, text: string, action?: any) => void;
+    onFormSubmit?: (formData: Record<string, any>, submitAction?: any) => void;
+}
 /**
  * Render an image block
  */
@@ -20,11 +23,27 @@ export declare function renderButtonBlock(block: Block, onButtonClick?: (link: s
  */
 export declare function renderHtmlBlock(block: Block): HTMLElement;
 /**
+ * Single input block (dashboard `input` type)
+ */
+export declare function renderInputBlock(block: Block): HTMLElement;
+/**
+ * Form block with submit
+ */
+export declare function renderFormBlock(block: Block, callbacks?: BlockRenderCallbacks): HTMLElement;
+/**
+ * Spacer / vertical gap block
+ */
+export declare function renderSpacerBlock(block: Block): HTMLElement;
+/**
+ * Row block with nested blocks
+ */
+export declare function renderRowBlock(block: Block, callbacks?: BlockRenderCallbacks): HTMLElement;
+/**
  * Render a block based on its type
  */
-export declare function renderBlock(block: Block, onButtonClick?: (link: string, text: string, action?: any) => void): HTMLElement;
+export declare function renderBlock(block: Block, callbacks?: BlockRenderCallbacks): HTMLElement;
 /**
  * Render multiple blocks
  */
-export declare function renderBlocks(blocks: Block[], onButtonClick?: (link: string, text: string, action?: any) => void): HTMLElement[];
+export declare function renderBlocks(blocks: Block[], callbacks?: BlockRenderCallbacks): HTMLElement[];
 //# sourceMappingURL=blockRenderer.d.ts.map

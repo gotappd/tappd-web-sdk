@@ -1,46 +1,131 @@
 /**
- * Type definitions for In-App Messages
+ * In-app message types — aligned with dashboard `apps/front/composables/types/inAppMessage.ts` and `cardBlocks.ts`.
  */
-export type InAppMessageType = 'banner' | 'popup' | 'modal' | 'full_screen' | 'notification';
+export type InAppMessageType = 'banner' | 'popup' | 'modal' | 'full_screen' | 'fullscreen' | 'notification';
 export type BannerPosition = 'top' | 'bottom' | 'center';
 export type AnimationType = 'slide' | 'fade' | 'none';
 export type NotificationAnimationDirection = 'up' | 'down' | 'left' | 'right';
 export type Alignment = 'left' | 'center' | 'right' | 'full' | 'justify';
-export type BlockType = 'image' | 'text' | 'button' | 'html';
-export interface ImageBlockConfig {
+export type BlockType = 'image' | 'text' | 'button' | 'html' | 'row' | 'form' | 'input' | 'spacer';
+export interface SpacingConfig {
+    padding?: number;
+    paddingTop?: number;
+    paddingRight?: number;
+    paddingBottom?: number;
+    paddingLeft?: number;
+    margin?: number;
+    marginTop?: number;
+    marginRight?: number;
+    marginBottom?: number;
+    marginLeft?: number;
+}
+export interface ImageBlockConfig extends SpacingConfig {
     url: string;
     alt?: string;
     width?: string;
     height?: string;
     alignment?: Alignment;
 }
-export interface TextBlockConfig {
+export interface TextBlockConfig extends SpacingConfig {
     content: string;
     alignment?: Alignment;
     fontSize?: string;
     fontWeight?: 'normal' | 'bold';
     color?: string;
 }
-export interface ButtonBlockConfig {
+export type ButtonActionType = 'none' | 'close' | 'track_event' | 'update_profile' | 'link';
+export interface ButtonAction {
+    type: ButtonActionType;
+    eventName?: string;
+    eventProperties?: Record<string, any>;
+    profileAttributes?: Record<string, string>;
+    link?: string;
+}
+export interface ButtonBlockConfig extends SpacingConfig {
     text: string;
-    link: string;
+    link?: string;
     textColor?: string;
     backgroundColor?: string;
+    /** CSS width (e.g. 'auto', '200px', '100%'). Ignored when alignment === 'full'. */
+    width?: string;
     linkBehavior?: 'deeplink' | 'in_app' | 'browser';
     alignment?: Alignment;
-    action?: {
-        type: string;
-        [key: string]: any;
+    action?: ButtonAction;
+}
+export interface HtmlBlockConfig extends SpacingConfig {
+    content: string;
+}
+export interface SpacerBlockConfig extends SpacingConfig {
+    height?: number;
+    backgroundColor?: string;
+    showDivider?: boolean;
+}
+export interface RowBlockConfig {
+    columns: number;
+    cells: Block[][];
+    pin?: 'none' | 'top' | 'bottom';
+    backgroundColor?: string;
+    borderWidth?: number;
+    borderStyle?: 'none' | 'solid' | 'dashed' | 'dotted';
+    borderColor?: string;
+    borderRadius?: number;
+    padding?: number;
+    paddingTop?: number;
+    paddingRight?: number;
+    paddingBottom?: number;
+    paddingLeft?: number;
+    margin?: number;
+    marginTop?: number;
+    marginRight?: number;
+    marginBottom?: number;
+    marginLeft?: number;
+    gap?: number;
+}
+export type InputType = 'text' | 'email' | 'tel' | 'number' | 'date' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'checkbox_group' | 'multiselect';
+export interface InputField extends SpacingConfig {
+    id: string;
+    label: string;
+    name: string;
+    type: InputType;
+    placeholder?: string;
+    required?: boolean;
+    defaultValue?: string;
+    options?: string[];
+    pii?: boolean;
+    validation?: {
+        min?: number;
+        max?: number;
+        pattern?: string;
     };
 }
-export interface HtmlBlockConfig {
-    content: string;
+export interface FormBlockConfig extends SpacingConfig {
+    fields: InputField[];
+    submitButtonText?: string;
+    submitButtonTextColor?: string;
+    submitButtonBackgroundColor?: string;
+    submitButtonAlignment?: Exclude<Alignment, 'justify'>;
+    submitButtonWidth?: string;
+    submitAction?: {
+        type: 'track_event' | 'update_profile' | 'both';
+        eventName?: string;
+        eventProperties?: Record<string, string>;
+        profileAttributes?: Record<string, string>;
+        mappedEventPropertiesOnly?: boolean;
+        mappedProfileOnly?: boolean;
+    };
+    alignment?: Alignment;
+    privacyNoticeHtml?: string;
+    consentFieldId?: string;
 }
 export interface BlockConfig {
     image?: ImageBlockConfig;
     text?: TextBlockConfig;
     button?: ButtonBlockConfig;
     html?: HtmlBlockConfig;
+    row?: RowBlockConfig;
+    form?: FormBlockConfig;
+    input?: InputField;
+    spacer?: SpacerBlockConfig;
 }
 export interface Block {
     id: string;
@@ -54,7 +139,9 @@ export interface InAppMessagePage {
     blocks: Block[];
     settings?: {
         backgroundColor?: string;
+        backgroundOpacity?: number;
         backgroundImage?: string;
+        backgroundImageEnabled?: boolean;
         maxWidth?: string;
         borderRadius?: string;
         [key: string]: any;
@@ -62,8 +149,13 @@ export interface InAppMessagePage {
 }
 export interface MessageContainerSettings {
     displayType?: InAppMessageType;
+    widthMode?: 'full' | 'custom';
+    customWidth?: string;
     maxWidth?: string;
     maxWidthUnit?: 'px' | 'em' | '%';
+    padding?: number;
+    margin?: number;
+    viewportPadding?: number;
     backgroundColor?: string;
     backgroundOpacity?: number;
     backgroundImage?: string;
@@ -72,6 +164,15 @@ export interface MessageContainerSettings {
     borderStyle?: 'solid' | 'dashed' | 'dotted' | 'none';
     borderColor?: string;
     borderRadius?: number;
+    showCloseButton?: boolean;
+    closeButtonPosition?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+    closeButtonStyle?: {
+        size?: number;
+        color?: string;
+        icon?: string;
+    };
+    notificationAnimation?: NotificationAnimationDirection;
+    notificationPosition?: 'top' | 'bottom' | 'left' | 'right';
 }
 export interface ContentSettings {
     defaultFontFamily?: string;
@@ -101,7 +202,7 @@ export interface ExpirationConfig {
     conditions?: any;
 }
 export interface InAppMessageConfig {
-    messageType: InAppMessageType;
+    messageType?: InAppMessageType;
     blocks?: Block[];
     pages?: InAppMessagePage[];
     position?: BannerPosition;
@@ -111,6 +212,7 @@ export interface InAppMessageConfig {
     closeButton?: boolean;
     showCloseButton?: boolean;
     showNavigationButtons?: boolean;
+    closeButtonPosition?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
     overlay?: boolean;
     overlayOpacity?: number;
     notificationAnimation?: NotificationAnimationDirection;

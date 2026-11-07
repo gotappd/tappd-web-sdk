@@ -1,6 +1,6 @@
 {
   "name": "@tappd/web-sdk",
-  "version": "1.0.2",
+  "version": "1.0.10",
   "description": "Tappd Web SDK for customer data collection and content delivery",
   "main": "dist/index.js",
   "browser": "dist/tappd-sdk.min.js",
@@ -14,6 +14,7 @@
     "build": "npm run build:es && npm run build:umd",
     "build:es": "tsc",
     "build:umd": "webpack --mode production",
+    "build:cdn": "node scripts/build-cdn.js",
     "dev": "tsc --watch",
     "version:patch": "npm version patch --no-git-tag-version",
     "build:patch": "npm run version:patch && npm run build",

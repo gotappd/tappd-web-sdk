@@ -24,11 +24,7 @@ export function getStyles(): string {
       position: relative;
     }
     
-    /* Blocks */
-    .tappd-block-image {
-      margin: 8px 0;
-    }
-    
+    /* Blocks — spacing comes from block config (preview parity) */
     .tappd-block-image img {
       display: block;
       max-width: 100%;
@@ -36,12 +32,7 @@ export function getStyles(): string {
     }
     
     .tappd-block-text {
-      margin: 8px 0;
       line-height: 1.5;
-    }
-    
-    .tappd-block-button {
-      margin: 12px 0;
     }
     
     .tappd-button {
@@ -63,10 +54,6 @@ export function getStyles(): string {
     
     .tappd-button:active {
       transform: translateY(0);
-    }
-    
-    .tappd-block-html {
-      margin: 8px 0;
     }
     
     .tappd-block-html img {
@@ -96,23 +83,6 @@ export function getStyles(): string {
     .tappd-message-modal {
       position: relative;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-    }
-    
-    /* Responsive */
-    @media (max-width: 768px) {
-      .tappd-message-popup,
-      .tappd-message-modal {
-        width: 95% !important;
-        max-width: 95% !important;
-      }
-      
-      .tappd-message-content {
-        padding: 16px !important;
-      }
-      
-      .tappd-message-banner .tappd-message-content {
-        padding: 12px !important;
-      }
     }
     
     /* Animation keyframes */

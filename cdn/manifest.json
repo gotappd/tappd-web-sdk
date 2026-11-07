@@ -1,0 +1,20 @@
+{
+  "name": "@tappd/web-sdk",
+  "version": "1.0.10",
+  "builtAt": "2026-10-23T03:50:41.509Z",
+  "cdnBase": "https://cdn.tappd.io",
+  "files": {
+    "tappd-sdk.min.js": {
+      "bytes": 81413,
+      "integrity": "sha384-6IQmTVF9rYwIve+FQowg+XM2Y7phPyb7jyRAm22UxsHVqNyw1iiPF+HV8TWUuTcp",
+      "urls": {
+        "latest": "https://cdn.tappd.io/web-sdk/v1/tappd-sdk.min.js",
+        "versioned": "https://cdn.tappd.io/web-sdk/1.0.10/tappd-sdk.min.js"
+      }
+    }
+  },
+  "usage": {
+    "script": "<script src=\"https://cdn.tappd.io/web-sdk/v1/tappd-sdk.min.js\" integrity=\"sha384-6IQmTVF9rYwIve+FQowg+XM2Y7phPyb7jyRAm22UxsHVqNyw1iiPF+HV8TWUuTcp\" crossorigin=\"anonymous\"></script>",
+    "init": "const tappd = new TappdSDK.TappdSDK({ appId: 'YOUR_APP_ID', apiUrl: 'https://sdk.gotappd.com/api/v1/sdk' });"
+  }
+}

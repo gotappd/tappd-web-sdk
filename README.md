@@ -681,7 +681,7 @@ For detailed endpoint documentation, see [API_ENDPOINTS.md](../API_ENDPOINTS.md)
 
 ## In-App Messages
 
-The SDK supports displaying in-app messages (banners, popups, and modals) created in your Tappd dashboard. Messages are automatically fetched and displayed when enabled using **smart polling** that only polls when users are active.
+The SDK supports displaying in-app messages (banners, popups, modals, notifications, multi-page layouts, row/form/input blocks, etc.) from the Tappd dashboard. Pending messages are fetched over the network on each poll (not skipped just because the local cache already has messages), so **test sends and new IAM appear within the polling interval** while the page is active.
 
 ### Configuration
 
@@ -690,21 +690,30 @@ const tappd = new TappdSDK({
   appId: 'YOUR_APP_ID',
   enableInAppMessages: true, // Enable in-app message rendering (default: true)
   autoDisplayMessages: true, // Automatically display pending messages (default: true)
-  messagePollingInterval: 300, // Poll for new messages every 300 seconds (5 minutes) when active (default: 300)
+  messagePollingInterval: 60, // Seconds between polls when active (default: 60)
+  minMessagePollingIntervalSeconds: 15, // Floor for the poll timer (default: 15)
+  messageFetchDedupeMs: 2000, // Skip duplicate GETs within this window (default: 2000; set 0 to always hit network)
   inactivityThreshold: 300, // Stop polling after 300 seconds (5 minutes) of inactivity (default: 300)
   messageContainerId: 'custom-container' // Optional: Custom DOM container ID
 });
 ```
 
+Call `await tappd.syncInAppMessages()` (alias for `displayPendingMessages(true)`) after identify or when you need an immediate refresh (for example after sending a test IAM from the dashboard).
+
+### Web push and IAM sync
+
+When a **web push** is delivered with data fields from `packages/shared/PUSH_IAM.md` (`tappd_message_type`, `iamId`, `tappd_iam_sync`), handle it in your service worker / client listener:
+
+- **Tab focused / visible:** post a message to your app or call `await tappd.syncInAppMessages()` (and `await tappd.triggerInAppMessageById(iamId, true)` if `iamId` is set) without showing a notification if you want silent sync.
+- **User clicks the notification:** call `trackPushOpen` if you track opens, then `syncInAppMessages` / `triggerInAppMessageById(iamId, true)`.
+
 ### Smart Polling Strategy
 
-The SDK uses an intelligent polling strategy to minimize API calls and improve battery life:
-
-1. **Always Fetch on Launch** - Messages are fetched immediately when the SDK initializes or page loads
-2. **Poll When Active** - Polls for new messages every 5 minutes (configurable) when user is active
-3. **Stop When Inactive** - Automatically stops polling after 5 minutes (configurable) of user inactivity
-4. **Resume on Activity** - Immediately fetches messages and resumes polling when user becomes active again
-5. **Local Caching** - Messages are cached in localStorage for 5 minutes for offline support and faster display
+1. **Fetch on launch** - Messages are fetched shortly after SDK init when auto-display is on
+2. **Poll when active** - Interval defaults to 60s (minimum 15s) while the user is active
+3. **Stop when inactive** - Stops polling after the inactivity threshold
+4. **Resume on activity** - Fetches again when the user returns
+5. **Short dedupe window** - Avoids hammering the API on burst calls; polling still retrieves new pending messages
 
 **Activity Detection:**
 - Tracks user interactions: clicks, scrolls, keyboard input, mouse movement, touch events

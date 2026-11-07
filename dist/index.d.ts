@@ -2,6 +2,7 @@
  * Tappd Web SDK
  * Customer Data Platform SDK for web applications
  */
+import { type AttributionTouchRecord } from './attributionStore';
 export interface TappdConfig {
     appId: string;
     apiUrl?: string;
@@ -12,14 +13,32 @@ export interface TappdConfig {
     enableInAppMessages?: boolean;
     autoDisplayMessages?: boolean;
     messagePollingInterval?: number;
+    /** Minimum seconds between poll ticks (default: 15). Lower values discover test/new IAM faster. */
+    minMessagePollingIntervalSeconds?: number;
     inactivityThreshold?: number;
     messageContainerId?: string;
+    /** Skip duplicate IAM API calls within this window in ms when not forceRefresh (default: 2000). Set 0 to always fetch. */
+    messageFetchDedupeMs?: number;
 }
 export interface CustomerAttributes {
     external_id: string;
     name?: string;
     email?: string;
     phone?: string;
+    /** IANA timezone e.g. Australia/Melbourne; defaults to browser timezone when omitted */
+    timezone?: string;
+    /** BCP-47 style normalized to e.g. en_AU when auto-filled from the browser */
+    locale?: string;
+    country?: string;
+    city?: string;
+    /** Most recently used device label (alias: deviceName) */
+    last_device_name?: string;
+    deviceName?: string;
+    /** Merged into reserved system attributes (whitelist); prefer top-level fields when possible */
+    systemAttributes?: Record<string, string>;
+    /** When true, marks the profile as internal/test (server-side); pair with dashboard settings for analytics/journey exclusion */
+    tappd_internal?: boolean;
+    is_internal?: boolean;
     [key: string]: any;
 }
 export interface EventProperties {
@@ -35,6 +54,8 @@ export declare class TappdSDK {
     private enableInAppMessages;
     private autoDisplayMessages;
     private messagePollingInterval;
+    private minMessagePollingIntervalSeconds;
+    private messageFetchDedupeMs;
     private messageContainerId?;
     private currentUserId;
     private anonymousId;
@@ -42,6 +63,8 @@ export declare class TappdSDK {
     private pageTracker;
     private displayedMessages;
     private shownMessages;
+    /** One-at-a-time IAM queue lock — id of the message currently on screen. */
+    private activeMessageId;
     private messagePageIndices;
     private messageContainers;
     private messagePollingTimer;
@@ -65,9 +88,12 @@ export declare class TappdSDK {
      */
     private getOrCreateAnonymousId;
     /**
-     * Start a new session (client-side only)
+     * Start a new session (client-side) and persist to server/ClickHouse.
+     * Does not require identify — anonymousId is enough for Session Analytics totals.
      */
     private startNewSession;
+    private persistSessionStart;
+    private persistSessionHeartbeat;
     /**
      * Check if session has expired and start a new one if needed
      */
@@ -109,6 +135,11 @@ export declare class TappdSDK {
     private getOSName;
     private getOSVersion;
     private getDeviceType;
+    /** Normalize navigator.language style tags to e.g. en_AU */
+    private normalizeLocaleTag;
+    private inferLocaleTag;
+    private getDefaultLastDeviceName;
+    private buildSystemAttributesPayload;
     /**
      * Identify a user
      * Requires external_id in attributes - SDK will generate internal userId automatically
@@ -139,6 +170,19 @@ export declare class TappdSDK {
      * Convenience wrapper around track() for push events
      */
     trackPushInteraction(type: 'opened' | 'clicked', properties?: EventProperties): Promise<void>;
+    /**
+     * Record a content-card click for attribution.
+     */
+    recordCardClick(params: {
+        messageId: string;
+        deliveryLogId?: string;
+        journeyId?: string;
+        enrollmentId?: string;
+        stepId?: string;
+        isTest?: boolean;
+    }): AttributionTouchRecord;
+    private setupAttributionSync;
+    private flushAttribution;
     /**
      * Track page view
      */
@@ -230,11 +274,30 @@ export declare class TappdSDK {
     /**
      * Display a single in-app message
      */
-    displayInAppMessage(message: any): Promise<void>;
+    displayInAppMessage(message: any, options?: {
+        forceDisplay?: boolean;
+    }): Promise<void>;
+    /**
+     * Pick the highest-priority eligible message for the one-at-a-time queue.
+     * Does not display — caller must call displayInAppMessage.
+     */
+    private pickNextEligibleMessage;
+    /**
+     * Trigger a specific in-app message by ID (e.g. from push payload).
+     * Uses the existing getInAppMessages + displayInAppMessage pipeline so
+     * triggers, expiration, and tracking behavior stay consistent.
+     */
+    triggerInAppMessageById(messageId: string, forceRefresh?: boolean, options?: {
+        forceDisplay?: boolean;
+    }): Promise<void>;
     /**
      * Display all pending messages
      */
     displayPendingMessages(forceRefresh?: boolean): Promise<void>;
+    /**
+     * Force-fetch pending IAM from the API and display any new ones. Call after identify or when you need fresh messages (e.g. after dashboard test send).
+     */
+    syncInAppMessages(): Promise<void>;
     /**
      * Dismiss an in-app message
      */
@@ -259,6 +322,10 @@ export declare class TappdSDK {
      * Track message event
      */
     trackMessageEvent(messageId: string, eventType: string, metadata: Record<string, any>): Promise<void>;
+    /**
+     * Promote an in-app message open/click to the server delivery log.
+     */
+    private markMessageInteraction;
     /**
      * Mark message as delivered
      */
@@ -340,6 +407,14 @@ export declare class TappdSDK {
      */
     unsubscribeFromPush(): Promise<void>;
     /**
+     * Open the workspace preference center for the identified customer.
+     * Requests a signed URL from the SDK API and opens it in a new tab / same window.
+     */
+    openPreferenceCenter(options?: {
+        preferenceCenterId?: string;
+        target?: '_blank' | '_self';
+    }): Promise<string>;
+    /**
      * Show permission prompt (slidedown, bell, or native)
      * @param {string} type - Prompt type: 'slidedown', 'bell', or 'native'
      * @returns {Promise<void>}
@@ -415,6 +490,15 @@ export declare class TappdSDK {
      * Track banner click
      */
     private trackBannerClick;
+    /**
+     * Landing pages: identify the visitor, record landing_page.viewed, and bump page analytics.
+     */
+    initLandingPage(options: {
+        landingPageId: string;
+        slug: string;
+        workspaceSlug: string;
+        visitorId?: string;
+    }): Promise<void>;
     /**
      * Track banner dismiss
      */
