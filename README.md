@@ -85,7 +85,7 @@ import TappdSDK from '@tappd/web-sdk';
 
 const tappd = new TappdSDK({
   appId: 'YOUR_APP_ID',
-  apiUrl: 'https://sdk.gotappd.com/api/v1/sdk', // Optional
+  apiUrl: 'https://sdk.tappd.io/api/v1/sdk', // Optional
   autoTrack: true, // Auto-track page views (default: true)
   sessionTimeout: 30, // Session timeout in minutes (default: 30)
   enableAutoCapture: false, // Auto-capture clicks/forms (default: false)
@@ -162,7 +162,7 @@ await tappd.track('user.signup', {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `appId` | string | **Required** | Your App ID from the dashboard |
-| `apiUrl` | string | `https://sdk.gotappd.com/api/v1/sdk` | Custom API URL |
+| `apiUrl` | string | `https://sdk.tappd.io/api/v1/sdk` | Custom API URL |
 | `autoTrack` | boolean | `true` | Auto-track page views |
 | `sessionTimeout` | number | `30` | Session timeout in minutes |
 | `enableAutoCapture` | boolean | `false` | Auto-capture clicks/forms |
@@ -618,7 +618,7 @@ const tappd = new TappdSDK({
 
 ## API Endpoints
 
-The SDK uses these API endpoints on `https://sdk.gotappd.com/api/v1/sdk` (automatically configured):
+The SDK uses these API endpoints on `https://sdk.tappd.io/api/v1/sdk` (automatically configured):
 
 ```
 POST /identify                    # Identify user
@@ -805,6 +805,6 @@ MIT
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/gotappd/web-sdk/issues
-- Documentation: https://docs.gotappd.com/web-sdk
-- Email: dev-support@gotappd.com
+- GitHub Issues: https://github.com/gotappd/tappd-web-sdk/issues
+- Documentation: https://docs.tappd.io/web-sdk/introduction
+- Email: support@tappd.io

@@ -34,7 +34,7 @@ The SDK is distributed in two formats:
     // Initialize SDK
     const tappd = new TappdSDK({
       appId: 'YOUR_APP_ID', // Get from dashboard
-      apiUrl: 'https://sdk.gotappd.com/api/v1/sdk',
+      apiUrl: 'https://sdk.tappd.io/api/v1/sdk',
       autoTrack: true,
       debug: false
     });
@@ -123,7 +123,7 @@ function App() {
     // Initialize SDK
     const tappd = new TappdSDK({
       appId: 'YOUR_APP_ID',
-      apiUrl: 'https://sdk.gotappd.com/api/v1/sdk',
+      apiUrl: 'https://sdk.tappd.io/api/v1/sdk',
       autoTrack: true
     });
 
@@ -265,6 +265,6 @@ Both examples demonstrate:
 ## Need Help?
 
 - 📚 [Full Documentation](./README.md)
-- 🐛 [Report Issues](https://github.com/gotappd/web-sdk/issues)
+- 🐛 [Report Issues](https://github.com/gotappd/tappd-web-sdk/issues)
 - 💬 [Get Support](https://support.tappd.io)
 

@@ -86,7 +86,7 @@ export class TappdSDK {
         // Store global reference for href="tappd.closeIAM()" support
         globalSDKInstance = this;
         this.appId = config.appId;
-        this.apiUrl = config.apiUrl || 'https://sdk.gotappd.com/api/v1/sdk';
+        this.apiUrl = config.apiUrl || 'https://sdk.tappd.io/api/v1/sdk';
         this.autoTrack = config.autoTrack !== false;
         this.sessionTimeout = config.sessionTimeout || 30;
         this.enableAutoCapture = config.enableAutoCapture || false;

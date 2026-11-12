@@ -10,7 +10,7 @@ class TappdSDK {
     }
 
     this.apiKey = apiKey;
-    this.baseUrl = options.baseUrl || 'https://sdk.gotappd.com/api/v1/sdk';
+    this.baseUrl = options.baseUrl || 'https://sdk.tappd.io/api/v1/sdk';
     this.cache = new Map();
     this.cacheTimeout = options.cacheTimeout || 5 * 60 * 1000; // 5 minutes
   }

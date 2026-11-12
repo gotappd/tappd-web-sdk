@@ -78,7 +78,7 @@ const manifest = {
   },
   usage: {
     script: `<script src="${latestUrl}" integrity="${integrity}" crossorigin="anonymous"></script>`,
-    init: `const tappd = new TappdSDK.TappdSDK({ appId: 'YOUR_APP_ID', apiUrl: 'https://sdk.gotappd.com/api/v1/sdk' });`,
+    init: `const tappd = new TappdSDK.TappdSDK({ appId: 'YOUR_APP_ID', apiUrl: 'https://sdk.tappd.io/api/v1/sdk' });`,
   },
 };
 

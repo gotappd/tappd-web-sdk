@@ -44,7 +44,7 @@ php -S localhost:8000
 ### Before Testing
 
 1. **Update App ID**: Replace `YOUR_APP_ID` in the HTML files with your actual App ID from the dashboard
-2. **Update API URL**: Change `apiUrl` if needed (default: `https://sdk.gotappd.com/api/v1/sdk`)
+2. **Update API URL**: Change `apiUrl` if needed (default: `https://sdk.tappd.io/api/v1/sdk`)
 
 ### Windows Access
 
@@ -98,7 +98,7 @@ Open browser DevTools (F12) to see SDK logs and debug information when `debug: t
 - [ ] App ID updated in HTML files
 - [ ] API URL configured correctly
 - [ ] Browser console open (F12)
-- [ ] API server accessible at `https://sdk.gotappd.com` (or custom URL configured)
+- [ ] API server accessible at `https://sdk.tappd.io` (or custom URL configured)
 - [ ] Test identify functionality
 - [ ] Test track event functionality
 - [ ] Check session ID and anonymous ID

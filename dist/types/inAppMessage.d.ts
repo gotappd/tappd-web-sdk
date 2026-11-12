@@ -1,12 +1,14 @@
 /**
  * In-app message types — aligned with dashboard `apps/front/composables/types/inAppMessage.ts` and `cardBlocks.ts`.
  */
+import type { CountdownSettings } from '../iamCountdown';
+import type { ImageShape } from '../iamImageShape';
 export type InAppMessageType = 'banner' | 'popup' | 'modal' | 'full_screen' | 'fullscreen' | 'notification';
 export type BannerPosition = 'top' | 'bottom' | 'center';
 export type AnimationType = 'slide' | 'fade' | 'none';
 export type NotificationAnimationDirection = 'up' | 'down' | 'left' | 'right';
 export type Alignment = 'left' | 'center' | 'right' | 'full' | 'justify';
-export type BlockType = 'image' | 'text' | 'button' | 'html' | 'row' | 'form' | 'input' | 'spacer';
+export type BlockType = 'image' | 'text' | 'button' | 'html' | 'row' | 'form' | 'input' | 'spacer' | 'countdown';
 export interface SpacingConfig {
     padding?: number;
     paddingTop?: number;
@@ -22,9 +24,15 @@ export interface SpacingConfig {
 export interface ImageBlockConfig extends SpacingConfig {
     url: string;
     alt?: string;
+    /** Opens in the browser on tap. Doesn't count as a click on the message. */
+    link?: string;
     width?: string;
     height?: string;
     alignment?: Alignment;
+    /** Corner style; unset keeps square corners. */
+    shape?: ImageShape;
+    borderWidth?: number;
+    borderColor?: string;
 }
 export interface TextBlockConfig extends SpacingConfig {
     content: string;
@@ -59,6 +67,18 @@ export interface SpacerBlockConfig extends SpacingConfig {
     height?: number;
     backgroundColor?: string;
     showDivider?: boolean;
+}
+export interface CountdownBlockConfig extends SpacingConfig, CountdownSettings {
+    variant?: 'boxes' | 'plain';
+    size?: 'sm' | 'md' | 'lg';
+    alignment?: 'left' | 'center' | 'right';
+    showLabels?: boolean;
+    digitColor?: string;
+    labelColor?: string;
+    boxColor?: string;
+    /** What shows at zero: a message (default), the timer at zero, or nothing. */
+    expiredBehavior?: 'text' | 'zero' | 'hide';
+    expiredText?: string;
 }
 export interface RowBlockConfig {
     columns: number;
@@ -126,6 +146,7 @@ export interface BlockConfig {
     form?: FormBlockConfig;
     input?: InputField;
     spacer?: SpacerBlockConfig;
+    countdown?: CountdownBlockConfig;
 }
 export interface Block {
     id: string;

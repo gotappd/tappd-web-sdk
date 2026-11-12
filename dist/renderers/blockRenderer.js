@@ -1,6 +1,8 @@
 /**
  * Block Renderer for In-App Messages
  */
+import { countdownParts, countdownSpokenText, resolveCountdownEnd } from '../iamCountdown';
+import { imageShapeCorners, imageShapeIsSquareCrop } from '../iamImageShape';
 function fieldIsPii(f) {
     if (f.pii)
         return true;
@@ -93,11 +95,13 @@ export function renderImageBlock(block) {
     }
     img.src = url;
     img.alt = config.alt || '';
+    // A typed width of "300" means pixels; CSS would otherwise ignore it.
+    const cssLength = (value) => (/^\d+(\.\d+)?$/.test(value.trim()) ? `${value.trim()}px` : value);
     if (config.width) {
-        img.style.width = config.width;
+        img.style.width = cssLength(String(config.width));
     }
     if (config.height) {
-        img.style.height = config.height;
+        img.style.height = cssLength(String(config.height));
     }
     const container = document.createElement('div');
     container.className = 'tappd-block-image';
@@ -113,13 +117,37 @@ export function renderImageBlock(block) {
         img.style.height = 'auto';
         img.style.display = 'inline-block';
     }
+    const corners = imageShapeCorners(config.shape);
+    if (corners) {
+        img.style.borderRadius = `${corners.topLeft}px ${corners.topRight}px ${corners.bottomRight}px ${corners.bottomLeft}px`;
+        img.style.objectFit = 'cover';
+    }
+    if (imageShapeIsSquareCrop(config.shape)) {
+        img.style.setProperty('aspect-ratio', '1 / 1');
+    }
+    if (Number(config.borderWidth) > 0) {
+        img.style.border = `${Number(config.borderWidth)}px solid ${config.borderColor || '#e5e7eb'}`;
+        img.style.boxSizing = 'border-box';
+    }
     img.addEventListener('error', () => {
         img.alt = 'Image unavailable';
         img.style.minHeight = '80px';
         img.style.background = '#f3f4f6';
         img.style.border = '1px dashed #d1d5db';
     });
-    container.appendChild(img);
+    const link = typeof config.link === 'string' ? config.link.trim() : '';
+    if (/^https?:\/\//i.test(link)) {
+        const anchor = document.createElement('a');
+        anchor.href = link;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener';
+        anchor.addEventListener('click', (e) => e.stopPropagation());
+        anchor.appendChild(img);
+        container.appendChild(anchor);
+    }
+    else {
+        container.appendChild(img);
+    }
     return container;
 }
 /**
@@ -143,6 +171,8 @@ export function renderTextBlock(block) {
             xl: '1.25rem',
             '2xl': '1.5rem',
             '3xl': '1.875rem',
+            '4xl': '2.25rem',
+            '5xl': '3rem',
         };
         container.style.fontSize = fontSizeMap[config.fontSize] || config.fontSize;
     }
@@ -582,6 +612,129 @@ export function renderSpacerBlock(block) {
     applySpacing(el, cfg);
     return el;
 }
+const COUNTDOWN_SIZES = {
+    sm: { digit: 18, label: 9, pad: 6, min: 38, gap: 4 },
+    md: { digit: 26, label: 10, pad: 8, min: 52, gap: 6 },
+    lg: { digit: 36, label: 11, pad: 10, min: 68, gap: 8 },
+};
+function paintCountdown(row, cfg, remainingMs) {
+    const size = COUNTDOWN_SIZES[cfg.size || 'md'] || COUNTDOWN_SIZES.md;
+    const plain = cfg.variant === 'plain';
+    const parts = countdownParts(remainingMs, cfg);
+    row.setAttribute('aria-label', countdownSpokenText(parts));
+    while (row.firstChild)
+        row.removeChild(row.firstChild);
+    parts.forEach((part, index) => {
+        if (plain && index > 0) {
+            const colon = document.createElement('span');
+            colon.textContent = ':';
+            colon.setAttribute('aria-hidden', 'true');
+            colon.style.fontSize = `${size.digit}px`;
+            colon.style.fontWeight = '700';
+            colon.style.lineHeight = '1.1';
+            colon.style.color = cfg.digitColor || '#111827';
+            row.appendChild(colon);
+        }
+        const unit = document.createElement('div');
+        unit.setAttribute('aria-hidden', 'true');
+        unit.style.display = 'flex';
+        unit.style.flexDirection = 'column';
+        unit.style.alignItems = 'center';
+        unit.style.boxSizing = 'border-box';
+        if (!plain) {
+            unit.style.minWidth = `${size.min}px`;
+            unit.style.padding = `${size.pad}px`;
+            unit.style.borderRadius = '10px';
+            unit.style.backgroundColor = cfg.boxColor || '#f3f4f6';
+        }
+        const digit = document.createElement('span');
+        digit.textContent = part.value;
+        digit.style.fontSize = `${size.digit}px`;
+        digit.style.fontWeight = '700';
+        digit.style.lineHeight = '1.1';
+        digit.style.fontVariantNumeric = 'tabular-nums';
+        digit.style.color = cfg.digitColor || '#111827';
+        unit.appendChild(digit);
+        if (cfg.showLabels !== false) {
+            const label = document.createElement('span');
+            label.textContent = part.label;
+            label.style.marginTop = '2px';
+            label.style.fontSize = `${size.label}px`;
+            label.style.color = cfg.labelColor || '#6b7280';
+            unit.appendChild(label);
+        }
+        row.appendChild(unit);
+    });
+}
+/**
+ * Countdown timer. Time always comes from the clock, so it stays right after the tab sleeps, and
+ * the interval stops by itself once the message has been removed from the page.
+ */
+export function renderCountdownBlock(block) {
+    const cfg = block.config.countdown;
+    const container = document.createElement('div');
+    if (!cfg)
+        return container;
+    const endsAt = resolveCountdownEnd(cfg, block.id);
+    if (endsAt === null)
+        return container;
+    container.className = 'tappd-block-countdown';
+    container.style.textAlign = cfg.alignment || 'center';
+    applySpacing(container, cfg);
+    const row = document.createElement('div');
+    row.setAttribute('role', 'timer');
+    row.style.display = 'inline-flex';
+    row.style.alignItems = 'flex-start';
+    row.style.flexWrap = 'wrap';
+    row.style.justifyContent = 'center';
+    row.style.gap = `${(COUNTDOWN_SIZES[cfg.size || 'md'] || COUNTDOWN_SIZES.md).gap}px`;
+    container.appendChild(row);
+    const finish = () => {
+        const behavior = cfg.expiredBehavior || 'text';
+        if (behavior === 'zero') {
+            paintCountdown(row, cfg, 0);
+        }
+        else if (behavior === 'hide') {
+            container.style.display = 'none';
+        }
+        else {
+            row.removeAttribute('role');
+            row.removeAttribute('aria-label');
+            while (row.firstChild)
+                row.removeChild(row.firstChild);
+            const text = document.createElement('span');
+            text.textContent = cfg.expiredText || 'This offer has ended';
+            text.style.fontSize = '14px';
+            text.style.fontWeight = '600';
+            text.style.color = cfg.digitColor || '#111827';
+            row.appendChild(text);
+        }
+    };
+    const remainingNow = endsAt - Date.now();
+    if (remainingNow <= 0) {
+        finish();
+        return container;
+    }
+    paintCountdown(row, cfg, remainingNow);
+    let attached = false;
+    const timer = setInterval(() => {
+        if (container.isConnected) {
+            attached = true;
+        }
+        else if (attached) {
+            clearInterval(timer);
+            return;
+        }
+        const remaining = endsAt - Date.now();
+        if (remaining <= 0) {
+            clearInterval(timer);
+            finish();
+            return;
+        }
+        paintCountdown(row, cfg, remaining);
+    }, 1000);
+    return container;
+}
 /**
  * Row block with nested blocks
  */
@@ -597,7 +750,8 @@ export function renderRowBlock(block, callbacks) {
     outer.style.flexDirection = 'row';
     outer.style.flexWrap = 'wrap';
     outer.style.width = '100%';
-    outer.style.gap = `${(_a = row.gap) !== null && _a !== void 0 ? _a : 8}px`;
+    const gap = Number((_a = row.gap) !== null && _a !== void 0 ? _a : 8) || 0;
+    outer.style.gap = `${gap}px`;
     outer.style.boxSizing = 'border-box';
     if (row.backgroundColor)
         outer.style.backgroundColor = row.backgroundColor;
@@ -619,7 +773,8 @@ export function renderRowBlock(block, callbacks) {
         marginLeft: row.marginLeft,
     });
     const n = Math.max(1, row.columns || row.cells.length);
-    const flexBasis = `${100 / n}%`;
+    // Columns share what's left after the gaps; a plain 100% / n would overflow and wrap onto new lines.
+    const flexBasis = `calc((100% - ${gap * (n - 1)}px) / ${n})`;
     row.cells.forEach((columnBlocks) => {
         const col = document.createElement('div');
         col.style.flex = `1 1 ${flexBasis}`;
@@ -655,6 +810,8 @@ export function renderBlock(block, callbacks) {
             return renderInputBlock(block);
         case 'spacer':
             return renderSpacerBlock(block);
+        case 'countdown':
+            return renderCountdownBlock(block);
         default:
             return document.createElement('div');
     }

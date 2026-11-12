@@ -35,6 +35,11 @@ export declare function renderFormBlock(block: Block, callbacks?: BlockRenderCal
  */
 export declare function renderSpacerBlock(block: Block): HTMLElement;
 /**
+ * Countdown timer. Time always comes from the clock, so it stays right after the tab sleeps, and
+ * the interval stops by itself once the message has been removed from the page.
+ */
+export declare function renderCountdownBlock(block: Block): HTMLElement;
+/**
  * Row block with nested blocks
  */
 export declare function renderRowBlock(block: Block, callbacks?: BlockRenderCallbacks): HTMLElement;
