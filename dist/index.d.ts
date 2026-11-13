@@ -19,6 +19,8 @@ export interface TappdConfig {
     messageContainerId?: string;
     /** Skip duplicate IAM API calls within this window in ms when not forceRefresh (default: 2000). Set 0 to always fetch. */
     messageFetchDedupeMs?: number;
+    /** Show signup forms (popups) set up in the dashboard (default: true). */
+    enableSignupForms?: boolean;
 }
 export interface CustomerAttributes {
     external_id: string;
@@ -82,6 +84,7 @@ export declare class TappdSDK {
     private serviceWorkerRegistration;
     private promptElement;
     private renderedBanners;
+    private signupForms;
     constructor(config: TappdConfig);
     /**
      * Get or create anonymous ID (stored in localStorage)
@@ -342,6 +345,11 @@ export declare class TappdSDK {
      * Capture form data from in-app messages
      */
     private captureFormData;
+    /**
+     * Signup forms share the one-at-a-time slot with in-app messages and start after the page
+     * has settled so they never compete with the site's own loading.
+     */
+    private initializeSignupForms;
     /**
      * Get email (if user is identified)
      */

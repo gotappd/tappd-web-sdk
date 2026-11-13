@@ -17,6 +17,7 @@ import {
   type AttributionTouchRecord,
 } from './attributionStore';
 import { sortInAppMessagesByPriority } from './iamDisplayPriority';
+import { SignupForms } from './forms/signupForms';
 export interface TappdConfig {
   appId: string; // Required: App ID from dashboard
   apiUrl?: string; // Optional: Custom API URL
@@ -33,6 +34,8 @@ export interface TappdConfig {
   messageContainerId?: string; // Custom container ID for messages (optional)
   /** Skip duplicate IAM API calls within this window in ms when not forceRefresh (default: 2000). Set 0 to always fetch. */
   messageFetchDedupeMs?: number;
+  /** Show signup forms (popups) set up in the dashboard (default: true). */
+  enableSignupForms?: boolean;
 }
 
 export interface CustomerAttributes {
@@ -116,6 +119,7 @@ export class TappdSDK {
   private serviceWorkerRegistration: ServiceWorkerRegistration | null = null;
   private promptElement: HTMLElement | null = null;
   private renderedBanners: Map<string, { displayId: string; element: HTMLElement }> = new Map();
+  private signupForms: SignupForms | null = null;
 
   constructor(config: TappdConfig) {
     // Store global reference for href="tappd.closeIAM()" support
@@ -156,6 +160,10 @@ export class TappdSDK {
     // Initialize in-app messages if enabled
     if (this.enableInAppMessages) {
       this.initializeInAppMessages();
+    }
+
+    if (config.enableSignupForms !== false && typeof window !== 'undefined') {
+      this.initializeSignupForms();
     }
 
     // Attribution: flush offline queue when back online / on init
@@ -689,6 +697,7 @@ export class TappdSDK {
    * Track an event with automatic session management
    */
   async track(eventName: string, properties?: EventProperties): Promise<void> {
+    this.signupForms?.onEvent(eventName);
     try {
       // Check if session expired
       this.checkAndRefreshSession();
@@ -877,6 +886,7 @@ export class TappdSDK {
    * Track page view
    */
   async trackPageView(url?: string, properties?: EventProperties): Promise<void> {
+    this.signupForms?.onPageView();
     try {
       // End previous page tracking if exists
       if (this.pageTracker) {
@@ -1777,6 +1787,10 @@ export class TappdSDK {
    * Close IAM (alias for dismissMessage with tracking)
    */
   async closeIAM(messageId?: string): Promise<void> {
+    if (this.signupForms?.isOpen() && (!messageId || messageId.startsWith('form_'))) {
+      this.signupForms.closeFromButton();
+      return;
+    }
     let targetMessageId = messageId;
     
     // If no messageId provided, find currently displayed message
@@ -1853,6 +1867,10 @@ export class TappdSDK {
    * Navigate to next page
    */
   async nextPage(messageId?: string): Promise<void> {
+    if (this.signupForms?.isOpen() && (!messageId || messageId.startsWith('form_'))) {
+      this.signupForms.nextFromButton();
+      return;
+    }
     let targetMessageId = messageId;
     
     if (!targetMessageId) {
@@ -1882,6 +1900,10 @@ export class TappdSDK {
    * Navigate to previous page
    */
   async previousPage(messageId?: string): Promise<void> {
+    if (this.signupForms?.isOpen() && (!messageId || messageId.startsWith('form_'))) {
+      this.signupForms.previousFromButton();
+      return;
+    }
     let targetMessageId = messageId;
     
     if (!targetMessageId) {
@@ -2089,6 +2111,45 @@ export class TappdSDK {
       this.log('[Tappd SDK] Form data captured:', result);
     } catch (error) {
       this.log('[Tappd SDK] Form capture error:', error);
+    }
+  }
+
+  /**
+   * Signup forms share the one-at-a-time slot with in-app messages and start after the page
+   * has settled so they never compete with the site's own loading.
+   */
+  private initializeSignupForms(): void {
+    this.signupForms = new SignupForms({
+      appId: this.appId,
+      apiUrl: this.apiUrl,
+      containerId: this.messageContainerId,
+      getAnonymousId: () => this.anonymousId,
+      getExternalId: () => this.getExternalId(),
+      getEmail: () => this.getEmail(),
+      isSlotFree: () => !this.activeMessageId,
+      claimSlot: (id: string) => {
+        this.activeMessageId = id;
+      },
+      releaseSlot: (id: string) => {
+        if (this.activeMessageId === id) this.activeMessageId = null;
+      },
+      ensureStyles: () => this.injectStyles(),
+      identify: (externalId: string, email: string) => this.identify({ external_id: externalId, email }),
+      rememberEmail: (email: string) => {
+        try {
+          localStorage.setItem('_tappd_email', email);
+        } catch {
+          /* private mode */
+        }
+      },
+      log: (...args: any[]) => this.log(...args),
+    });
+    const start = () => this.signupForms?.start();
+    const idle = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
+    if (document.readyState === 'complete') {
+      idle ? idle(start, { timeout: 3000 }) : setTimeout(start, 1000);
+    } else {
+      window.addEventListener('load', () => (idle ? idle(start, { timeout: 3000 }) : setTimeout(start, 1000)), { once: true });
     }
   }
 

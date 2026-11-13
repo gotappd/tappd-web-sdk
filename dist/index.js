@@ -27,6 +27,7 @@ import { getStyles } from './renderers/styles';
 import { CUSTOMER_SYSTEM_ATTRIBUTE_KEYS, CUSTOMER_SYSTEM_ATTRIBUTE_KEY_LIST, } from './customerSystemAttributeKeys';
 import { recordLocalTouch, getTouchesForConversion, flushAttributionSync, syncIdentifyMerge, } from './attributionStore';
 import { sortInAppMessagesByPriority } from './iamDisplayPriority';
+import { SignupForms } from './forms/signupForms';
 // Global reference to SDK instance for href="tappd.closeIAM()" support
 let globalSDKInstance = null;
 export class TappdSDK {
@@ -56,6 +57,7 @@ export class TappdSDK {
         this.serviceWorkerRegistration = null;
         this.promptElement = null;
         this.renderedBanners = new Map();
+        this.signupForms = null;
         /**
          * Banner API
          */
@@ -115,6 +117,9 @@ export class TappdSDK {
         // Initialize in-app messages if enabled
         if (this.enableInAppMessages) {
             this.initializeInAppMessages();
+        }
+        if (config.enableSignupForms !== false && typeof window !== 'undefined') {
+            this.initializeSignupForms();
         }
         // Attribution: flush offline queue when back online / on init
         this.setupAttributionSync();
@@ -593,7 +598,8 @@ export class TappdSDK {
      */
     track(eventName, properties) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c;
+            var _a, _b, _c, _d;
+            (_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.onEvent(eventName);
             try {
                 // Check if session expired
                 this.checkAndRefreshSession();
@@ -618,8 +624,8 @@ export class TappdSDK {
                 const response = yield this.post('/track', {
                     eventName,
                     properties: properties || {},
-                    sessionId: (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId,
-                    sessionStartTime: (_b = this.session) === null || _b === void 0 ? void 0 : _b.startedAt,
+                    sessionId: (_b = this.session) === null || _b === void 0 ? void 0 : _b.sessionId,
+                    sessionStartTime: (_c = this.session) === null || _c === void 0 ? void 0 : _c.startedAt,
                     sessionDuration,
                     userId,
                     external_id: externalId, // Include external_id if available
@@ -636,7 +642,7 @@ export class TappdSDK {
                 // Clean old events (older than 1 hour)
                 this.cleanOldEvents();
                 // Handle personalized in-app messages returned from trackEvent
-                if (((_c = response === null || response === void 0 ? void 0 : response.data) === null || _c === void 0 ? void 0 : _c.inAppMessages) && Array.isArray(response.data.inAppMessages)) {
+                if (((_d = response === null || response === void 0 ? void 0 : response.data) === null || _d === void 0 ? void 0 : _d.inAppMessages) && Array.isArray(response.data.inAppMessages)) {
                     this.log(`[Tappd SDK] Received ${response.data.inAppMessages.length} personalized message(s) from event tracking`);
                     // Add messages to cache
                     response.data.inAppMessages.forEach((msg) => {
@@ -757,7 +763,8 @@ export class TappdSDK {
      */
     trackPageView(url, properties) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b;
+            var _a, _b, _c;
+            (_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.onPageView();
             try {
                 // End previous page tracking if exists
                 if (this.pageTracker) {
@@ -797,8 +804,8 @@ export class TappdSDK {
                     title: currentTitle,
                     referrer,
                     duration: 0, // Current page duration is 0
-                    sessionId: (_a = this.session) === null || _a === void 0 ? void 0 : _a.sessionId,
-                    sessionStartTime: (_b = this.session) === null || _b === void 0 ? void 0 : _b.startedAt,
+                    sessionId: (_b = this.session) === null || _b === void 0 ? void 0 : _b.sessionId,
+                    sessionStartTime: (_c = this.session) === null || _c === void 0 ? void 0 : _c.startedAt,
                     sessionDuration,
                     userId,
                     external_id: externalId, // Include external_id if available
@@ -1566,6 +1573,11 @@ export class TappdSDK {
      */
     closeIAM(messageId) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (((_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.isOpen()) && (!messageId || messageId.startsWith('form_'))) {
+                this.signupForms.closeFromButton();
+                return;
+            }
             let targetMessageId = messageId;
             // If no messageId provided, find currently displayed message
             if (!targetMessageId) {
@@ -1635,6 +1647,11 @@ export class TappdSDK {
      */
     nextPage(messageId) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (((_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.isOpen()) && (!messageId || messageId.startsWith('form_'))) {
+                this.signupForms.nextFromButton();
+                return;
+            }
             let targetMessageId = messageId;
             if (!targetMessageId) {
                 const displayedIds = Array.from(this.displayedMessages);
@@ -1662,6 +1679,11 @@ export class TappdSDK {
      */
     previousPage(messageId) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (((_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.isOpen()) && (!messageId || messageId.startsWith('form_'))) {
+                this.signupForms.previousFromButton();
+                return;
+            }
             let targetMessageId = messageId;
             if (!targetMessageId) {
                 const displayedIds = Array.from(this.displayedMessages);
@@ -1857,6 +1879,47 @@ export class TappdSDK {
                 this.log('[Tappd SDK] Form capture error:', error);
             }
         });
+    }
+    /**
+     * Signup forms share the one-at-a-time slot with in-app messages and start after the page
+     * has settled so they never compete with the site's own loading.
+     */
+    initializeSignupForms() {
+        this.signupForms = new SignupForms({
+            appId: this.appId,
+            apiUrl: this.apiUrl,
+            containerId: this.messageContainerId,
+            getAnonymousId: () => this.anonymousId,
+            getExternalId: () => this.getExternalId(),
+            getEmail: () => this.getEmail(),
+            isSlotFree: () => !this.activeMessageId,
+            claimSlot: (id) => {
+                this.activeMessageId = id;
+            },
+            releaseSlot: (id) => {
+                if (this.activeMessageId === id)
+                    this.activeMessageId = null;
+            },
+            ensureStyles: () => this.injectStyles(),
+            identify: (externalId, email) => this.identify({ external_id: externalId, email }),
+            rememberEmail: (email) => {
+                try {
+                    localStorage.setItem('_tappd_email', email);
+                }
+                catch (_a) {
+                    /* private mode */
+                }
+            },
+            log: (...args) => this.log(...args),
+        });
+        const start = () => { var _a; return (_a = this.signupForms) === null || _a === void 0 ? void 0 : _a.start(); };
+        const idle = window.requestIdleCallback;
+        if (document.readyState === 'complete') {
+            idle ? idle(start, { timeout: 3000 }) : setTimeout(start, 1000);
+        }
+        else {
+            window.addEventListener('load', () => (idle ? idle(start, { timeout: 3000 }) : setTimeout(start, 1000)), { once: true });
+        }
     }
     /**
      * Get email (if user is identified)

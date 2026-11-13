@@ -1,20 +1,20 @@
 {
   "name": "@tappd/web-sdk",
-  "version": "1.0.11",
-  "builtAt": "2026-11-12T01:35:33.269Z",
+  "version": "1.0.12",
+  "builtAt": "2026-11-13T03:22:56.345Z",
   "cdnBase": "https://cdn.tappd.io",
   "files": {
     "tappd-sdk.min.js": {
-      "bytes": 86154,
-      "integrity": "sha384-biu58ygR0XD4KH46sNzx37ThWMiVgcb61AheGKFDElk2Xrv0qWJfk5a1KVzJ8hae",
+      "bytes": 101533,
+      "integrity": "sha384-DjnSSj0vfVwmin3b1fJxu3Wa8U43GZhsr91GkihvoaoATm35A57syo75qIl5MxDe",
       "urls": {
         "latest": "https://cdn.tappd.io/web-sdk/v1/tappd-sdk.min.js",
-        "versioned": "https://cdn.tappd.io/web-sdk/1.0.11/tappd-sdk.min.js"
+        "versioned": "https://cdn.tappd.io/web-sdk/1.0.12/tappd-sdk.min.js"
       }
     }
   },
   "usage": {
-    "script": "<script src=\"https://cdn.tappd.io/web-sdk/v1/tappd-sdk.min.js\" integrity=\"sha384-biu58ygR0XD4KH46sNzx37ThWMiVgcb61AheGKFDElk2Xrv0qWJfk5a1KVzJ8hae\" crossorigin=\"anonymous\"></script>",
+    "script": "<script src=\"https://cdn.tappd.io/web-sdk/v1/tappd-sdk.min.js\" integrity=\"sha384-DjnSSj0vfVwmin3b1fJxu3Wa8U43GZhsr91GkihvoaoATm35A57syo75qIl5MxDe\" crossorigin=\"anonymous\"></script>",
     "init": "const tappd = new TappdSDK.TappdSDK({ appId: 'YOUR_APP_ID', apiUrl: 'https://sdk.tappd.io/api/v1/sdk' });"
   }
 }
