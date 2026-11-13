@@ -106,6 +106,8 @@ export interface CountdownBlockConfig extends SpacingConfig, CountdownSettings {
 export interface RowBlockConfig {
   columns: number;
   cells: Block[][];
+  /** Stack the columns vertically on screens up to 600px wide. */
+  stackOnMobile?: boolean;
   pin?: 'none' | 'top' | 'bottom';
   backgroundColor?: string;
   borderWidth?: number;
@@ -157,6 +159,8 @@ export interface InputField extends SpacingConfig {
 
 export interface FormBlockConfig extends SpacingConfig {
   fields: InputField[];
+  /** Colour for field labels (e.g. white on a dark background). */
+  labelColor?: string;
   submitButtonText?: string;
   submitButtonTextColor?: string;
   submitButtonBackgroundColor?: string;

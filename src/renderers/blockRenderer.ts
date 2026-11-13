@@ -380,7 +380,7 @@ export function renderHtmlBlock(block: Block): HTMLElement {
   return container;
 }
 
-function renderInputFieldControl(field: InputField): HTMLElement {
+function renderInputFieldControl(field: InputField, opts: { labelColor?: string } = {}): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'tappd-iam-field';
   wrap.style.marginBottom = '12px';
@@ -390,6 +390,8 @@ function renderInputFieldControl(field: InputField): HTMLElement {
   lab.style.display = 'block';
   lab.style.marginBottom = '4px';
   lab.style.fontSize = '14px';
+  // Optional: forms on dark backgrounds need light labels (inherits the page colour otherwise).
+  if (opts.labelColor) lab.style.color = opts.labelColor;
 
   if (field.type === 'checkbox') {
     const row = document.createElement('div');
@@ -568,7 +570,7 @@ export function renderFormBlock(block: Block, callbacks?: BlockRenderCallbacks):
   }
 
   cfg.fields.forEach((field) => {
-    form.appendChild(renderInputFieldControl(field));
+    form.appendChild(renderInputFieldControl(field, { labelColor: cfg.labelColor }));
   });
 
   const submit = document.createElement('button');
@@ -801,6 +803,9 @@ export function renderRowBlock(block: Block, callbacks?: BlockRenderCallbacks): 
     marginBottom: row.marginBottom,
     marginLeft: row.marginLeft,
   });
+
+  // Opt-in: on narrow screens the columns stack (see .tappd-row-stack in styles.ts).
+  if (row.stackOnMobile) outer.classList.add('tappd-row-stack');
 
   const n = Math.max(1, row.columns || row.cells.length);
   // Columns share what's left after the gaps; a plain 100% / n would overflow and wrap onto new lines.

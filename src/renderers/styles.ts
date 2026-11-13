@@ -34,6 +34,22 @@ export function getStyles(): string {
     .tappd-block-text {
       line-height: 1.5;
     }
+
+    /* Rows with stackOnMobile: one column per line on phones, with photos kept short. */
+    @media (max-width: 600px) {
+      .tappd-row-stack {
+        flex-direction: column !important;
+      }
+      .tappd-row-stack > div {
+        flex-basis: auto !important;
+        width: 100%;
+      }
+      .tappd-row-stack .tappd-block-image img {
+        width: 100%;
+        max-height: 200px;
+        object-fit: cover;
+      }
+    }
     
     .tappd-button {
       display: inline-block;
