@@ -1,6 +1,6 @@
 {
   "name": "@tappd/web-sdk",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Tappd Web SDK for customer data collection and content delivery",
   "main": "dist/index.js",
   "browser": "dist/tappd-sdk.min.js",
