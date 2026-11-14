@@ -21,7 +21,7 @@ export type NotificationAnimationDirection = 'up' | 'down' | 'left' | 'right';
 
 export type Alignment = 'left' | 'center' | 'right' | 'full' | 'justify';
 
-export type BlockType = 'image' | 'text' | 'button' | 'html' | 'row' | 'form' | 'input' | 'spacer' | 'countdown';
+export type BlockType = 'image' | 'text' | 'button' | 'html' | 'row' | 'form' | 'input' | 'spacer' | 'countdown' | 'wheel';
 
 export interface SpacingConfig {
   padding?: number;
@@ -189,6 +189,8 @@ export interface BlockConfig {
   input?: InputField;
   spacer?: SpacerBlockConfig;
   countdown?: CountdownBlockConfig;
+  /** Spin-to-win wheel (signup forms only); see forms/wheel.ts. */
+  wheel?: import('../forms/wheel').WheelBlockConfig;
 }
 
 export interface Block {

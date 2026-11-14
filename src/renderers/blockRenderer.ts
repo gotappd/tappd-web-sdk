@@ -5,6 +5,7 @@
 import type { Block, SpacingConfig, InputField, FormBlockConfig, CountdownBlockConfig } from '../types/inAppMessage';
 import { countdownParts, countdownSpokenText, resolveCountdownEnd } from '../iamCountdown';
 import { imageShapeCorners, imageShapeIsSquareCrop } from '../iamImageShape';
+import { renderWheelBlock } from '../forms/wheel';
 
 function fieldIsPii(f: InputField): boolean {
   if (f.pii) return true;
@@ -857,6 +858,8 @@ export function renderBlock(block: Block, callbacks?: BlockRenderCallbacks): HTM
       return renderSpacerBlock(block);
     case 'countdown':
       return renderCountdownBlock(block);
+    case 'wheel':
+      return renderWheelBlock(block);
     default:
       return document.createElement('div');
   }

@@ -13,13 +13,16 @@ import {
   collectFormFields,
   fillPlaceholders,
   isEligible,
+  pickVariant,
   isMobileViewport,
   pageStep,
   readSubmission,
+  type FormHistory,
   type FormHistoryMap,
   type PublicSignupForm,
 } from './rules';
 import { TriggerEngine } from './triggers';
+import { fillWheelSlices, spinWheel } from './wheel';
 
 const HISTORY_KEY = '_tappd_forms';
 const PAGE_COUNT_KEY = '_tappd_form_pages';
@@ -45,6 +48,9 @@ export interface SignupFormHost {
 
 interface OpenForm {
   form: PublicSignupForm;
+  /** The design being shown: the form's own, or the A/B test variant picked for this visitor. */
+  config: any;
+  variantId?: string;
   slotId: string;
   element: HTMLElement | null;
   pageIndex: number;
@@ -157,7 +163,7 @@ export class SignupForms {
     try { return JSON.parse(storageGet(window.localStorage, HISTORY_KEY) || '{}') || {}; } catch { return {}; }
   }
 
-  private updateHistory(formId: string, patch: Record<string, number>): void {
+  private updateHistory(formId: string, patch: Partial<FormHistory>): void {
     const all = this.history();
     all[formId] = { ...(all[formId] || {}), ...patch };
     storageSet(window.localStorage, HISTORY_KEY, JSON.stringify(all));
@@ -209,10 +215,14 @@ export class SignupForms {
     const slotId = `form_${form.id}`;
     this.host.claimSlot(slotId);
     this.shownThisPage.add(form.id);
-    this.open = { form, slotId, element: null, pageIndex: 0, values: {}, submitted: false, busy: false };
+    const variant = this.chooseVariant(form);
+    this.open = {
+      form, config: variant?.config || form.config, variantId: variant?.id,
+      slotId, element: null, pageIndex: 0, values: {}, submitted: false, busy: false,
+    };
     this.render();
     this.updateHistory(form.id, { views: (this.history()[form.id]?.views || 0) + 1 });
-    this.sendEvents(form.id, [{ type: 'view' }]);
+    this.sendEvents(form.id, [{ type: 'view' }], variant?.id);
   }
 
   private render(): void {
@@ -222,7 +232,10 @@ export class SignupForms {
     const pseudoMessage: any = {
       _id: o.slotId,
       // Steps advance only through a successful submit, so hide the generic Previous/Next buttons.
-      config: { ...fillPlaceholders(o.form.config, o.values), showNavigationButtons: false },
+      config: {
+        ...fillWheelSlices(fillPlaceholders(o.config, o.values), (o.form.wheel || []).map((s) => s.label)),
+        showNavigationButtons: false,
+      },
     };
     o.element = renderMessage(pseudoMessage, {
       currentPageIndex: o.pageIndex,
@@ -246,7 +259,7 @@ export class SignupForms {
   }
 
   private pages(): any[] {
-    return Array.isArray(this.open?.form.config?.pages) ? this.open!.form.config.pages : [];
+    return Array.isArray(this.open?.config?.pages) ? this.open!.config.pages : [];
   }
 
   private async handleSubmit(data: Record<string, any>): Promise<void> {
@@ -269,6 +282,7 @@ export class SignupForms {
           step,
           ...parsed,
           stepToken: o.stepToken,
+          variantId: o.variantId,
           anonymousId: this.host.getAnonymousId(),
           pageUrl: window.location.href,
         }),
@@ -283,13 +297,19 @@ export class SignupForms {
         o.submitted = true;
         o.stepToken = result.stepToken;
         o.values = {
-          discount_code: result.code || null,
+          discount_code: result.code || (result.pending ? o.form.pendingNotice || 'Check your inbox to confirm your email.' : null),
           wheel_prize: result.wheelIndex != null ? o.form.wheel?.[result.wheelIndex]?.label || null : null,
         };
         this.updateHistory(o.form.id, { submittedAt: Date.now() });
         this.host.rememberEmail(parsed.email);
         if (result.externalId) this.host.identify(result.externalId, parsed.email).catch(() => undefined);
         if (result.code) this.applyShopifyDiscount(result.code);
+        // Let the wheel land on the server's prize before showing the result page.
+        if (result.wheelIndex != null) {
+          this.setSubmitting(true);
+          await spinWheel(o.element?.closest('.tappd-message-overlay') || o.element, Number(result.wheelIndex));
+          if (this.open !== o) return;
+        }
       }
       this.advance();
     } catch (err) {
@@ -310,6 +330,16 @@ export class SignupForms {
     } else {
       this.close('completed');
     }
+  }
+
+  /** Greys out the form's controls while the wheel spins. */
+  private setSubmitting(on: boolean): void {
+    const root = this.open?.element;
+    if (!root) return;
+    const scope = (root.closest('.tappd-message-overlay') as HTMLElement) || root;
+    scope.querySelectorAll('form button, form input').forEach((el) => {
+      (el as HTMLButtonElement | HTMLInputElement).disabled = on;
+    });
   }
 
   private setError(message: string | null): void {
@@ -335,7 +365,7 @@ export class SignupForms {
     this.host.releaseSlot(o.slotId);
     if (!o.submitted) {
       this.updateHistory(o.form.id, { closedAt: Date.now() });
-      this.sendEvents(o.form.id, [{ type: 'close' }]);
+      this.sendEvents(o.form.id, [{ type: 'close' }], o.variantId);
       if (o.form.teaser?.enabled && o.form.teaser.showAfterClose !== false && reason !== 'completed') {
         this.showTeaser(o.form);
       }
@@ -394,11 +424,29 @@ export class SignupForms {
     fetch(`/discount/${encodeURIComponent(code)}`, { credentials: 'same-origin', redirect: 'manual' }).catch(() => undefined);
   }
 
-  private sendEvents(formId: string, events: { type: 'view' | 'close' }[]): void {
+  /**
+   * The A/B design for this visitor. Stored per form so it survives identify() changing the
+   * anonymous id; a new test (new key) assigns again.
+   */
+  private chooseVariant(form: PublicSignupForm): { id: string; config: any } | null {
+    const exp = form.experiment;
+    if (!exp?.variants?.length) return null;
+    const saved = this.history()[form.id]?.variant || '';
+    const [savedKey, savedId] = saved.split(':');
+    let id = savedKey === exp.key ? savedId : null;
+    if (!id || !exp.variants.some((v) => v.id === id && Number(v.weight) > 0)) {
+      id = pickVariant(exp.variants, `${this.host.getAnonymousId()}:${form.id}:${exp.key}`);
+      if (id) this.updateHistory(form.id, { variant: `${exp.key}:${id}` });
+    }
+    const chosen = exp.variants.find((v) => v.id === id);
+    return chosen?.config ? { id: chosen.id, config: chosen.config } : null;
+  }
+
+  private sendEvents(formId: string, events: { type: 'view' | 'close' }[], variantId?: string): void {
     fetch(`${this.host.apiUrl}/forms/${encodeURIComponent(formId)}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-App-Id': this.host.appId },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({ events, variantId }),
       keepalive: true,
     }).catch(() => undefined);
   }

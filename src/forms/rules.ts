@@ -20,6 +20,12 @@ export interface PublicSignupForm {
   wheel?: { label: string }[];
   hasOffer?: boolean;
   consent?: { emailText?: string; smsText?: string };
+  /** Double opt-in: the code arrives after the email is confirmed. */
+  doubleOptIn?: boolean;
+  /** Shown in place of {{ discount_code }} while the signup awaits confirmation. */
+  pendingNotice?: string;
+  /** Running A/B test: each design with its share of traffic. `key` changes per test. */
+  experiment?: { key: string; variants: { id: string; weight: number; config: any }[] };
   publishedAt?: string;
 }
 
@@ -27,6 +33,8 @@ export interface FormHistory {
   closedAt?: number;
   submittedAt?: number;
   views?: number;
+  /** A/B test assignment, "<experiment key>:<variant id>", so a visitor keeps seeing one design. */
+  variant?: string;
 }
 
 export type FormHistoryMap = Record<string, FormHistory>;
@@ -111,6 +119,32 @@ export interface EligibilityContext {
   visitor: { known: boolean; subscribed: boolean };
   history: FormHistoryMap;
   now: number;
+}
+
+/** FNV-1a: a small, stable string hash for assigning designs. */
+export function hashString(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/**
+ * Picks a design for a visitor. The same seed always gets the same design, and designs
+ * are chosen in proportion to their weights. Returns null when no design has weight.
+ */
+export function pickVariant(variants: { id: string; weight: number }[], seed: string): string | null {
+  const live = variants.filter((v) => Number(v.weight) > 0);
+  const total = live.reduce((sum, v) => sum + Number(v.weight), 0);
+  if (!(total > 0)) return null;
+  let point = (hashString(seed) % 10000) / 10000 * total;
+  for (const v of live) {
+    point -= Number(v.weight);
+    if (point < 0) return v.id;
+  }
+  return live[live.length - 1].id;
 }
 
 export function isEligible(form: PublicSignupForm, ctx: EligibilityContext): boolean {
