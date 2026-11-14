@@ -376,6 +376,7 @@ function renderInputFieldControl(field, opts = {}) {
         row.style.gap = '8px';
         const input = document.createElement('input');
         input.type = 'checkbox';
+        input.className = 'tappd-choice';
         input.id = `tappd-field-${field.id}`;
         input.name = field.name;
         input.value = 'true';
@@ -405,6 +406,7 @@ function renderInputFieldControl(field, opts = {}) {
             r.style.gap = '6px';
             const input = document.createElement('input');
             input.type = 'radio';
+            input.className = 'tappd-choice';
             input.name = field.name;
             input.value = opt;
             input.id = `tappd-field-${field.id}-${i}`;
@@ -438,6 +440,7 @@ function renderInputFieldControl(field, opts = {}) {
             r.style.gap = '6px';
             const input = document.createElement('input');
             input.type = 'checkbox';
+            input.className = 'tappd-choice';
             input.name = field.name;
             input.value = opt;
             input.id = `tappd-field-${field.id}-${i}`;
@@ -495,8 +498,8 @@ function renderInputFieldControl(field, opts = {}) {
                             : 'text';
         input.style.width = '100%';
         input.style.boxSizing = 'border-box';
-        input.style.padding = '8px';
     }
+    input.className = 'tappd-input';
     input.id = `tappd-field-${field.id}`;
     input.name = field.name;
     if (field.placeholder)
@@ -533,6 +536,9 @@ export function renderFormBlock(block, callbacks) {
     form.style.width = '100%';
     form.style.boxSizing = 'border-box'; // width:100% + padding must not overflow the container
     applySpacing(form, cfg);
+    // Focus ring / hover border follow the brand colour picked for the submit button.
+    if (cfg.submitButtonBackgroundColor)
+        form.style.setProperty('--tappd-accent', cfg.submitButtonBackgroundColor);
     const mx = (parseFloat(form.style.marginLeft) || 0) + (parseFloat(form.style.marginRight) || 0);
     if (mx)
         form.style.width = `calc(100% - ${mx}px)`;
