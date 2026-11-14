@@ -3,6 +3,7 @@
  */
 import { countdownParts, countdownSpokenText, resolveCountdownEnd } from '../iamCountdown';
 import { imageShapeCorners, imageShapeIsSquareCrop } from '../iamImageShape';
+import { renderWheelBlock } from '../forms/wheel';
 function fieldIsPii(f) {
     if (f.pii)
         return true;
@@ -824,6 +825,8 @@ export function renderBlock(block, callbacks) {
             return renderSpacerBlock(block);
         case 'countdown':
             return renderCountdownBlock(block);
+        case 'wheel':
+            return renderWheelBlock(block);
         default:
             return document.createElement('div');
     }

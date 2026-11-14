@@ -18,8 +18,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
  * after the email step.
  */
 import { renderMessage } from '../renderers/messageRenderer';
-import { collectFormFields, fillPlaceholders, isEligible, isMobileViewport, pageStep, readSubmission, } from './rules';
+import { collectFormFields, fillPlaceholders, isEligible, pickVariant, isMobileViewport, pageStep, readSubmission, } from './rules';
 import { TriggerEngine } from './triggers';
+import { fillWheelSlices, spinWheel } from './wheel';
 const HISTORY_KEY = '_tappd_forms';
 const PAGE_COUNT_KEY = '_tappd_form_pages';
 const SLOT_RETRY_MS = 3000;
@@ -194,10 +195,14 @@ export class SignupForms {
         const slotId = `form_${form.id}`;
         this.host.claimSlot(slotId);
         this.shownThisPage.add(form.id);
-        this.open = { form, slotId, element: null, pageIndex: 0, values: {}, submitted: false, busy: false };
+        const variant = this.chooseVariant(form);
+        this.open = {
+            form, config: (variant === null || variant === void 0 ? void 0 : variant.config) || form.config, variantId: variant === null || variant === void 0 ? void 0 : variant.id,
+            slotId, element: null, pageIndex: 0, values: {}, submitted: false, busy: false,
+        };
         this.render();
         this.updateHistory(form.id, { views: (((_a = this.history()[form.id]) === null || _a === void 0 ? void 0 : _a.views) || 0) + 1 });
-        this.sendEvents(form.id, [{ type: 'view' }]);
+        this.sendEvents(form.id, [{ type: 'view' }], variant === null || variant === void 0 ? void 0 : variant.id);
     }
     render() {
         const o = this.open;
@@ -207,7 +212,7 @@ export class SignupForms {
         const pseudoMessage = {
             _id: o.slotId,
             // Steps advance only through a successful submit, so hide the generic Previous/Next buttons.
-            config: Object.assign(Object.assign({}, fillPlaceholders(o.form.config, o.values)), { showNavigationButtons: false }),
+            config: Object.assign(Object.assign({}, fillWheelSlices(fillPlaceholders(o.config, o.values), (o.form.wheel || []).map((s) => s.label))), { showNavigationButtons: false }),
         };
         o.element = renderMessage(pseudoMessage, {
             currentPageIndex: o.pageIndex,
@@ -234,11 +239,11 @@ export class SignupForms {
     }
     pages() {
         var _a, _b;
-        return Array.isArray((_b = (_a = this.open) === null || _a === void 0 ? void 0 : _a.form.config) === null || _b === void 0 ? void 0 : _b.pages) ? this.open.form.config.pages : [];
+        return Array.isArray((_b = (_a = this.open) === null || _a === void 0 ? void 0 : _a.config) === null || _b === void 0 ? void 0 : _b.pages) ? this.open.config.pages : [];
     }
     handleSubmit(data) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b;
+            var _a, _b, _c;
             const o = this.open;
             if (!o || o.busy)
                 return;
@@ -256,7 +261,7 @@ export class SignupForms {
                 const res = yield fetch(`${this.host.apiUrl}/forms/${encodeURIComponent(o.form.id)}/submit`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-App-Id': this.host.appId },
-                    body: JSON.stringify(Object.assign(Object.assign({ step }, parsed), { stepToken: o.stepToken, anonymousId: this.host.getAnonymousId(), pageUrl: window.location.href })),
+                    body: JSON.stringify(Object.assign(Object.assign({ step }, parsed), { stepToken: o.stepToken, variantId: o.variantId, anonymousId: this.host.getAnonymousId(), pageUrl: window.location.href })),
                 });
                 const body = yield res.json().catch(() => ({}));
                 if (!res.ok || (body === null || body === void 0 ? void 0 : body.success) === false) {
@@ -268,7 +273,7 @@ export class SignupForms {
                     o.submitted = true;
                     o.stepToken = result.stepToken;
                     o.values = {
-                        discount_code: result.code || null,
+                        discount_code: result.code || (result.pending ? o.form.pendingNotice || 'Check your inbox to confirm your email.' : null),
                         wheel_prize: result.wheelIndex != null ? ((_b = (_a = o.form.wheel) === null || _a === void 0 ? void 0 : _a[result.wheelIndex]) === null || _b === void 0 ? void 0 : _b.label) || null : null,
                     };
                     this.updateHistory(o.form.id, { submittedAt: Date.now() });
@@ -277,6 +282,13 @@ export class SignupForms {
                         this.host.identify(result.externalId, parsed.email).catch(() => undefined);
                     if (result.code)
                         this.applyShopifyDiscount(result.code);
+                    // Let the wheel land on the server's prize before showing the result page.
+                    if (result.wheelIndex != null) {
+                        this.setSubmitting(true);
+                        yield spinWheel(((_c = o.element) === null || _c === void 0 ? void 0 : _c.closest('.tappd-message-overlay')) || o.element, Number(result.wheelIndex));
+                        if (this.open !== o)
+                            return;
+                    }
                 }
                 this.advance();
             }
@@ -302,6 +314,17 @@ export class SignupForms {
         else {
             this.close('completed');
         }
+    }
+    /** Greys out the form's controls while the wheel spins. */
+    setSubmitting(on) {
+        var _a;
+        const root = (_a = this.open) === null || _a === void 0 ? void 0 : _a.element;
+        if (!root)
+            return;
+        const scope = root.closest('.tappd-message-overlay') || root;
+        scope.querySelectorAll('form button, form input').forEach((el) => {
+            el.disabled = on;
+        });
     }
     setError(message) {
         var _a;
@@ -330,7 +353,7 @@ export class SignupForms {
         this.host.releaseSlot(o.slotId);
         if (!o.submitted) {
             this.updateHistory(o.form.id, { closedAt: Date.now() });
-            this.sendEvents(o.form.id, [{ type: 'close' }]);
+            this.sendEvents(o.form.id, [{ type: 'close' }], o.variantId);
             if (((_a = o.form.teaser) === null || _a === void 0 ? void 0 : _a.enabled) && o.form.teaser.showAfterClose !== false && reason !== 'completed') {
                 this.showTeaser(o.form);
             }
@@ -386,11 +409,31 @@ export class SignupForms {
             return;
         fetch(`/discount/${encodeURIComponent(code)}`, { credentials: 'same-origin', redirect: 'manual' }).catch(() => undefined);
     }
-    sendEvents(formId, events) {
+    /**
+     * The A/B design for this visitor. Stored per form so it survives identify() changing the
+     * anonymous id; a new test (new key) assigns again.
+     */
+    chooseVariant(form) {
+        var _a, _b;
+        const exp = form.experiment;
+        if (!((_a = exp === null || exp === void 0 ? void 0 : exp.variants) === null || _a === void 0 ? void 0 : _a.length))
+            return null;
+        const saved = ((_b = this.history()[form.id]) === null || _b === void 0 ? void 0 : _b.variant) || '';
+        const [savedKey, savedId] = saved.split(':');
+        let id = savedKey === exp.key ? savedId : null;
+        if (!id || !exp.variants.some((v) => v.id === id && Number(v.weight) > 0)) {
+            id = pickVariant(exp.variants, `${this.host.getAnonymousId()}:${form.id}:${exp.key}`);
+            if (id)
+                this.updateHistory(form.id, { variant: `${exp.key}:${id}` });
+        }
+        const chosen = exp.variants.find((v) => v.id === id);
+        return (chosen === null || chosen === void 0 ? void 0 : chosen.config) ? { id: chosen.id, config: chosen.config } : null;
+    }
+    sendEvents(formId, events, variantId) {
         fetch(`${this.host.apiUrl}/forms/${encodeURIComponent(formId)}/events`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-App-Id': this.host.appId },
-            body: JSON.stringify({ events }),
+            body: JSON.stringify({ events, variantId }),
             keepalive: true,
         }).catch(() => undefined);
     }

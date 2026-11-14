@@ -43,12 +43,27 @@ export interface PublicSignupForm {
         emailText?: string;
         smsText?: string;
     };
+    /** Double opt-in: the code arrives after the email is confirmed. */
+    doubleOptIn?: boolean;
+    /** Shown in place of {{ discount_code }} while the signup awaits confirmation. */
+    pendingNotice?: string;
+    /** Running A/B test: each design with its share of traffic. `key` changes per test. */
+    experiment?: {
+        key: string;
+        variants: {
+            id: string;
+            weight: number;
+            config: any;
+        }[];
+    };
     publishedAt?: string;
 }
 export interface FormHistory {
     closedAt?: number;
     submittedAt?: number;
     views?: number;
+    /** A/B test assignment, "<experiment key>:<variant id>", so a visitor keeps seeing one design. */
+    variant?: string;
 }
 export type FormHistoryMap = Record<string, FormHistory>;
 /**
@@ -78,6 +93,16 @@ export interface EligibilityContext {
     history: FormHistoryMap;
     now: number;
 }
+/** FNV-1a: a small, stable string hash for assigning designs. */
+export declare function hashString(s: string): number;
+/**
+ * Picks a design for a visitor. The same seed always gets the same design, and designs
+ * are chosen in proportion to their weights. Returns null when no design has weight.
+ */
+export declare function pickVariant(variants: {
+    id: string;
+    weight: number;
+}[], seed: string): string | null;
 export declare function isEligible(form: PublicSignupForm, ctx: EligibilityContext): boolean;
 /**
  * Replaces {{ discount_code }} and {{ wheel_prize }} in every string of a form config.

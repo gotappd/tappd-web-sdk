@@ -80,6 +80,32 @@ export function isSnoozed(form, history, now) {
         return true;
     return false;
 }
+/** FNV-1a: a small, stable string hash for assigning designs. */
+export function hashString(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i += 1) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+}
+/**
+ * Picks a design for a visitor. The same seed always gets the same design, and designs
+ * are chosen in proportion to their weights. Returns null when no design has weight.
+ */
+export function pickVariant(variants, seed) {
+    const live = variants.filter((v) => Number(v.weight) > 0);
+    const total = live.reduce((sum, v) => sum + Number(v.weight), 0);
+    if (!(total > 0))
+        return null;
+    let point = (hashString(seed) % 10000) / 10000 * total;
+    for (const v of live) {
+        point -= Number(v.weight);
+        if (point < 0)
+            return v.id;
+    }
+    return live[live.length - 1].id;
+}
 export function isEligible(form, ctx) {
     if (!(form === null || form === void 0 ? void 0 : form.id) || !form.config)
         return false;

@@ -48,12 +48,19 @@ export declare class SignupForms {
     private handleSubmit;
     /** Next page, or close when the form has no more pages. */
     private advance;
+    /** Greys out the form's controls while the wheel spins. */
+    private setSubmitting;
     private setError;
     private close;
     private showTeaser;
     private removeTeaser;
     /** On Shopify storefronts, visiting /discount/CODE stores the code for checkout. */
     private applyShopifyDiscount;
+    /**
+     * The A/B design for this visitor. Stored per form so it survives identify() changing the
+     * anonymous id; a new test (new key) assigns again.
+     */
+    private chooseVariant;
     private sendEvents;
 }
 //# sourceMappingURL=signupForms.d.ts.map
